@@ -1,41 +1,54 @@
-// Le questionnaire de douleur de KPULS : le corps en 3D, la plainte zone par
-// zone, l'origine de la douleur, puis l'envoi vers l'appli.
+// Le questionnaire de douleur de KPULS, en parcours guidé.
+//
+// Une seule question à l'écran à la fois, pour que le patient se sente accompagné :
+//   1. la partie du corps (face ou dos, haut ou bas)
+//   2. le muscle, une fois la zone agrandie
+//   3. une phrase pour dire d'où vient la douleur et comment elle est apparue
+//   4. l'intensité, en pourcentage, puis l'envoi
 
 import * as THREE from 'three';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { construireCorps, MUSCLES, REGIONS } from './corps.js';
 
 // ---------------------------------------------------------------------------
-// Données du questionnaire
+// Données
 // ---------------------------------------------------------------------------
 
 const SENSATIONS = [
   ['tire', 'Ça tire'], ['brule', 'Ça brûle'], ['lance', 'Ça lance'],
   ['transperce', 'Ça transperce'], ['raideur', 'Raideur'], ['fourmillements', 'Fourmillements'],
 ];
-const ORIGINES = [
-  ['chute', 'Une chute'], ['faux-mouvement', 'Un faux mouvement'], ['sport', 'Le sport'],
-  ['travail', 'Le travail ou la posture'], ['progressif', "Ça s'est installé peu à peu"],
-  ['inconnu', 'Je ne sais pas'],
-];
-const DEPUIS = [
-  ['moins-1-semaine', "Moins d'une semaine"], ['1-4-semaines', '1 à 4 semaines'],
-  ['1-3-mois', '1 à 3 mois'], ['plus-3-mois', 'Plus de 3 mois'],
-];
+const NOMS_PARTIE = {
+  'face-haut': 'Face, haut du corps', 'face-bas': 'Face, bas du corps',
+  'dos-haut': 'Dos, haut du corps', 'dos-bas': 'Dos, bas du corps',
+};
+const ETAPES = ['zone', 'muscle', 'phrase', 'intensite'];
+const TITRES = {
+  zone: 'Où as-tu mal ?', muscle: 'Quel muscle ?',
+  phrase: 'Raconte-nous', intensite: 'Ta douleur',
+};
+const ZONES_MAX = 3;
+const SEUIL_HAUT_BAS = 1.0;   // hauteur du corps (en mètres) qui sépare le haut du bas
 
 const params = new URLSearchParams(location.search);
 const prenom = (params.get('p') || '').trim().slice(0, 30);
 const modeDebug = params.has('debug');
 
 const etat = {
-  vue: 'face',
-  zones: new Map(),          // id du muscle -> { sensation, intensite }
-  actif: null,               // muscle en cours d'édition
-  origine: null,
-  depuis: null,
+  etape: 'zone',
+  zone: null,            // { vue, moitie } de la partie du corps choisie
+  actif: null,           // muscle en cours de saisie
+  brouillon: null,       // { phrase, sensation, intensite }
+  zones: new Map(),      // id du muscle -> { sensation, intensite, phrase, vue, moitie }
 };
 
 const $ = (sel) => document.querySelector(sel);
+function elt(tag, classe, texte) {
+  const e = document.createElement(tag);
+  if (classe) e.className = classe;
+  if (texte !== undefined) e.textContent = texte;
+  return e;
+}
 
 // ---------------------------------------------------------------------------
 // Scène 3D
@@ -55,10 +68,20 @@ const lumiere = new THREE.DirectionalLight(0xffffff, 1.35);
 lumiere.position.set(0.6, 0.9, 1);
 camera.add(lumiere);
 
-const { corps, meshMuscles } = construireCorps();
+const { corps, meshMuscles, parties } = construireCorps();
 scene.add(corps);
 
-const CENTRE = new THREE.Vector3(0, 0.93, 0);
+// Chaque muscle sait dans quelle moitié du corps il se trouve.
+{
+  const p = new THREE.Vector3();
+  for (const mesh of meshMuscles) {
+    mesh.getWorldPosition(p);
+    mesh.userData.moitie = p.y >= SEUIL_HAUT_BAS ? 'haut' : 'bas';
+    mesh.visible = false;
+  }
+}
+
+const CENTRE = new THREE.Vector3(0, 1.0, 0);
 const controles = new OrbitControls(camera, toile);
 controles.enableDamping = true;
 controles.dampingFactor = 0.09;
@@ -70,24 +93,25 @@ controles.maxPolarAngle = 2.0;
 controles.screenSpacePanning = true;
 controles.target.copy(CENTRE);
 
-function distanceAjustee() {
-  const demiFov = THREE.MathUtils.degToRad(camera.fov / 2);
-  return 2.0 / (2 * Math.tan(demiFov));
+const TAN_DEMI_FOV = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+
+function distanceEnsemble() {
+  return Math.max(2.1 / (2 * TAN_DEMI_FOV), 0.95 / (2 * TAN_DEMI_FOV * camera.aspect));
 }
 
-function placerCamera(azimut, hauteur = 0.18, distance = distanceAjustee(), cible = CENTRE) {
-  camera.position.set(
+function positionCamera(azimut, cible, distance, hauteur = 0.16) {
+  return new THREE.Vector3(
     cible.x + Math.sin(azimut) * distance,
     cible.y + hauteur * distance,
     cible.z + Math.cos(azimut) * distance,
   );
-  controles.target.copy(cible);
-  controles.update();
 }
-placerCamera(0);
+
+camera.position.copy(positionCamera(0, CENTRE, distanceEnsemble()));
+controles.update();
 
 let anim = null;
-function animerVers(position, cible, duree = 650) {
+function animerVers(position, cible, duree = 700) {
   anim = {
     t0: performance.now(), duree,
     p0: camera.position.clone(), p1: position.clone(),
@@ -95,26 +119,32 @@ function animerVers(position, cible, duree = 650) {
   };
 }
 
-function azimutCourant() {
+function vueCourante() {
   const d = camera.position.clone().sub(controles.target);
-  return Math.atan2(d.x, d.z);
+  return d.z >= 0 ? 'face' : 'dos';
 }
 
-function versVue(vue) {
-  etat.vue = vue;
+function surlignerVue(vue) {
   document.querySelectorAll('#vues button').forEach(b => b.classList.toggle('actif', b.dataset.vue === vue));
-  fermerPlainte(false);
-  const d = distanceAjustee();
+}
+
+function vueDensemble(vue = vueCourante()) {
+  surlignerVue(vue);
   const a = vue === 'face' ? 0 : Math.PI;
-  animerVers(new THREE.Vector3(Math.sin(a) * d, CENTRE.y + 0.18 * d, Math.cos(a) * d), CENTRE);
+  animerVers(positionCamera(a, CENTRE, distanceEnsemble()), CENTRE);
 }
 
-function vueDensemble() {
-  const d = distanceAjustee();
-  const a = azimutCourant();
-  animerVers(new THREE.Vector3(Math.sin(a) * d, CENTRE.y + 0.18 * d, Math.cos(a) * d), CENTRE);
+// Agrandit la partie du corps choisie pour que les muscles se distinguent.
+function cadrerZone(z) {
+  const haut = z.moitie === 'haut';
+  const hauteur = haut ? 0.74 : 1.0;
+  const largeur = haut ? 0.84 : 0.56;
+  const d = Math.max(hauteur / (2 * TAN_DEMI_FOV), largeur / (2 * TAN_DEMI_FOV * camera.aspect));
+  const cible = new THREE.Vector3(0, haut ? 1.27 : 0.52, 0);
+  animerVers(positionCamera(z.vue === 'face' ? 0 : Math.PI, cible, d), cible);
 }
 
+// Rapproche la caméra d'un muscle, en le tournant vers l'écran.
 function focaliser(mesh) {
   const cible = new THREE.Vector3();
   mesh.getWorldPosition(cible);
@@ -123,13 +153,11 @@ function focaliser(mesh) {
   normale.y = 0;
   if (normale.lengthSq() < 1e-4) normale.set(0, 0, 1);
   normale.normalize();
-  const d = 1.05;
-  const position = cible.clone().addScaledVector(normale, d);
+  const position = cible.clone().addScaledVector(normale, 1.05);
   position.y += 0.12;
   animerVers(position, cible);
 }
 
-// Adaptation à la taille de la zone d'affichage.
 function redimensionner() {
   const w = zoneScene.clientWidth, h = zoneScene.clientHeight;
   if (w === 0 || h === 0) return;
@@ -140,6 +168,11 @@ function redimensionner() {
 new ResizeObserver(redimensionner).observe(zoneScene);
 redimensionner();
 
+// L'affichage se réorganise quand le bas de l'écran apparaît : on attend un instant.
+function apresMiseEnPage(fn) {
+  requestAnimationFrame(() => requestAnimationFrame(() => { redimensionner(); fn(); }));
+}
+
 // Couleurs des muscles : neutre, ou dégradé selon l'intensité de la douleur.
 const couleurFaible = new THREE.Color(0xffb3a8);
 const couleurForte = new THREE.Color(0xff2d1f);
@@ -149,14 +182,28 @@ function rafraichirCouleurs() {
     const id = mesh.userData.muscle.id;
     const zone = etat.zones.get(id);
     const mat = mesh.material;
-    if (zone) {
-      mat.color.copy(couleurFaible).lerp(couleurForte, zone.intensite);
+    let intensite = zone ? zone.intensite : null;
+    if (etat.actif && etat.actif.id === id && etat.brouillon && etat.brouillon.intensite !== null) {
+      intensite = etat.brouillon.intensite;
+    }
+    if (intensite !== null) {
+      mat.color.copy(couleurFaible).lerp(couleurForte, intensite);
       mat.emissive.copy(mat.color).multiplyScalar(0.35);
     } else {
       mat.color.copy(mesh.userData.couleur);
       mat.emissive.setRGB(0, 0, 0);
     }
     if (etat.actif && etat.actif.id === id) mat.emissive.setRGB(0.55, 0.55, 0.55);
+  }
+}
+
+// Les muscles n'apparaissent qu'une fois la partie du corps choisie.
+function majVisibilite() {
+  const enDetail = etat.etape !== 'zone' && etat.zone;
+  for (const mesh of meshMuscles) {
+    const m = mesh.userData.muscle;
+    const dansZone = enDetail && m.vue === etat.zone.vue && mesh.userData.moitie === etat.zone.moitie;
+    mesh.visible = Boolean(etat.zones.has(m.id) || dansZone || (etat.actif && etat.actif.id === m.id));
   }
 }
 
@@ -171,8 +218,8 @@ function boucle(maintenant) {
   }
   controles.update();
 
-  // Petite pulsation du muscle en cours d'édition.
   for (const mesh of meshMuscles) {
+    if (!mesh.visible) continue;
     const actif = etat.actif && etat.actif.id === mesh.userData.muscle.id;
     const f = actif ? 1.06 + 0.04 * Math.sin(maintenant / 220) : 1;
     mesh.scale.copy(mesh.userData.echelle).multiplyScalar(f);
@@ -182,7 +229,7 @@ function boucle(maintenant) {
 requestAnimationFrame(boucle);
 
 // ---------------------------------------------------------------------------
-// Choix d'un muscle au toucher
+// Toucher le corps
 // ---------------------------------------------------------------------------
 
 const rayon = new THREE.Raycaster();
@@ -203,194 +250,320 @@ toile.addEventListener('pointerup', (e) => {
 });
 toile.addEventListener('pointercancel', (e) => { pointeurs.delete(e.pointerId); debut = null; });
 
-function toucher(cx, cy) {
+function pointeRayon(cx, cy) {
+  const r = toile.getBoundingClientRect();
+  const ndc = new THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
+  rayon.setFromCamera(ndc, camera);
+  return r;
+}
+
+// Le muscle visible le plus proche du doigt, avec une tolérance d'un doigt.
+function muscleProche(cx, cy, candidats, tolerance = 34) {
   const r = toile.getBoundingClientRect();
   const x = cx - r.left, y = cy - r.top;
-  const ndc = new THREE.Vector2((x / r.width) * 2 - 1, -(y / r.height) * 2 + 1);
-  rayon.setFromCamera(ndc, camera);
+  let meilleur = null, distMin = tolerance;
+  const pos = new THREE.Vector3(), normale = new THREE.Vector3(), q = new THREE.Quaternion();
+  for (const mesh of candidats) {
+    mesh.getWorldPosition(pos);
+    normale.copy(mesh.userData.normalLocale).applyQuaternion(mesh.parent.getWorldQuaternion(q));
+    if (normale.dot(camera.position.clone().sub(pos).normalize()) < 0.25) continue;
+    const p = pos.clone().project(camera);
+    const dist = Math.hypot((p.x + 1) / 2 * r.width - x, (1 - p.y) / 2 * r.height - y);
+    if (dist < distMin) { distMin = dist; meilleur = mesh.userData.muscle; }
+  }
+  return meilleur;
+}
 
-  // 1. Le muscle directement sous le doigt.
-  const touches = rayon.intersectObjects([...meshMuscles, ...corps.children.flatMap(g => g.children.filter(c => !c.userData.muscle))], false);
-  const premiere = touches[0];
-  if (premiere && premiere.object.userData.muscle) {
-    ouvrirPlainte(premiere.object.userData.muscle);
+function toucher(cx, cy) {
+  pointeRayon(cx, cy);
+
+  if (etat.etape === 'zone') {
+    // Une zone déjà renseignée se rouvre en la touchant.
+    const deja = meshMuscles.filter(m => m.visible);
+    const touchesM = rayon.intersectObjects(deja, false);
+    if (touchesM[0]) { modifierZone(touchesM[0].object.userData.muscle.id); return; }
+    // Sinon, on regarde où le doigt a touché le corps : haut ou bas, face ou dos.
+    const touchesC = rayon.intersectObjects(parties, false);
+    if (!touchesC[0]) return;
+    choisirZone({
+      vue: vueCourante(),
+      moitie: touchesC[0].point.y >= SEUIL_HAUT_BAS ? 'haut' : 'bas',
+    });
     return;
   }
 
-  // 2. Sinon, le muscle visible le plus proche du doigt (tolérance d'un doigt).
-  let meilleur = null, distMin = 34;
-  const pos = new THREE.Vector3(), normale = new THREE.Vector3(), q = new THREE.Quaternion();
-  for (const mesh of meshMuscles) {
-    mesh.getWorldPosition(pos);
-    normale.copy(mesh.userData.normalLocale).applyQuaternion(mesh.parent.getWorldQuaternion(q));
-    const versCamera = camera.position.clone().sub(pos).normalize();
-    if (normale.dot(versCamera) < 0.25) continue;
-    const p = pos.clone().project(camera);
-    const px = (p.x + 1) / 2 * r.width, py = (1 - p.y) / 2 * r.height;
-    const dist = Math.hypot(px - x, py - y);
-    if (dist < distMin) { distMin = dist; meilleur = mesh.userData.muscle; }
+  if (etat.etape === 'muscle') {
+    const candidats = meshMuscles.filter(m => m.visible);
+    const directs = rayon.intersectObjects(candidats, false);
+    const muscle = directs[0] ? directs[0].object.userData.muscle : muscleProche(cx, cy, candidats);
+    if (muscle) choisirMuscle(muscle);
   }
-  if (meilleur) ouvrirPlainte(meilleur);
 }
 
 // ---------------------------------------------------------------------------
-// Bas de l'écran : liste des zones, ou saisie d'une plainte
+// Le parcours
 // ---------------------------------------------------------------------------
 
 const dock = $('#dock');
+const bulle = $('#bulle');
 
-function elt(tag, classe, texte) {
-  const e = document.createElement(tag);
-  if (classe) e.className = classe;
-  if (texte !== undefined) e.textContent = texte;
-  return e;
+function dire(texte, precision) {
+  bulle.replaceChildren(document.createTextNode(texte));
+  if (precision) bulle.append(elt('small', '', precision));
+  bulle.hidden = false;
+  bulle.style.animation = 'none';
+  void bulle.offsetWidth;
+  bulle.style.animation = '';
 }
 
-function afficherZones() {
-  dock.replaceChildren();
-  const titre = elt('p', 'titre-petit', 'Tes zones');
-  dock.append(titre);
+function allerEtape(nom) {
+  etat.etape = nom;
+  const i = ETAPES.indexOf(nom);
 
-  if (etat.zones.size === 0) {
-    dock.append(elt('p', 'vide', "Aucune zone pour l'instant. Touche un muscle pour commencer."));
-  } else {
-    const liste = elt('div', 'zones');
-    const triees = [...etat.zones.entries()].sort((a, b) => b[1].intensite - a[1].intensite);
-    for (const [id, z] of triees) {
-      const m = MUSCLES.find(x => x.id === id);
-      const b = elt('button', 'zone', m.nomAffiche);
-      b.type = 'button';
-      b.append(elt('b', '', `${Math.round(z.intensite * 100)} %`));
-      b.addEventListener('click', () => { ouvrirPlainte(m); });
-      liste.append(b);
-    }
-    dock.append(liste);
+  $('#titre-etape').textContent = TITRES[nom];
+  $('#bt-retour').hidden = nom === 'zone';
+  $('#entete').classList.toggle('sans-retour', nom === 'zone');
+  document.querySelectorAll('#points span').forEach((p, k) => {
+    p.classList.toggle('fait', k < i);
+    p.classList.toggle('actif', k === i);
+  });
+  $('#vues').hidden = nom !== 'zone';
+
+  dock.replaceChildren();
+  dock.hidden = true;
+
+  if (nom === 'zone') {
+    etat.actif = null;
+    etat.brouillon = null;
+    dire(etat.zones.size === 0
+      ? 'Touche la partie de ton corps qui te fait mal.'
+      : 'Tu peux ajouter une autre zone, ou envoyer ton bilan.',
+      etat.zones.size === 0 ? 'Tu peux le tourner du doigt, ou choisir Face ou Dos.' : null);
+    afficherZonesDeja();
+    majVisibilite();
+    rafraichirCouleurs();
+    apresMiseEnPage(() => vueDensemble());
+    return;
   }
 
-  const suite = elt('button', 'bouton', 'Continuer');
-  suite.type = 'button';
-  suite.disabled = etat.zones.size === 0;
-  suite.addEventListener('click', () => montrer('origine'));
-  dock.append(suite);
+  if (nom === 'muscle') {
+    etat.actif = null;
+    etat.brouillon = null;
+    dire('Peux-tu être plus précis ? Touche le muscle qui te fait mal.',
+      'Si tu te trompes, la flèche en haut te ramène en arrière.');
+    majVisibilite();
+    rafraichirCouleurs();
+    apresMiseEnPage(() => cadrerZone(etat.zone));
+    return;
+  }
+
+  if (nom === 'phrase') {
+    dire("Dis-nous en une phrase d'où ça vient et comment c'est apparu.");
+    afficherPhrase();
+  } else if (nom === 'intensite') {
+    dire('Dernière étape : à combien évalues-tu ta douleur ?', 'Fais glisser le curseur.');
+    afficherIntensite();
+  }
+  dock.hidden = false;
+  majVisibilite();
+  rafraichirCouleurs();
+  const mesh = meshMuscles.find(x => x.userData.muscle.id === etat.actif.id);
+  apresMiseEnPage(() => { if (mesh) focaliser(mesh); });
 }
 
-function ouvrirPlainte(m) {
+function retour() {
+  if (etat.etape === 'phrase') allerEtape('muscle');
+  else if (etat.etape === 'intensite') allerEtape('phrase');
+  else if (etat.etape === 'muscle') { etat.zone = null; allerEtape('zone'); }
+}
+
+function choisirZone(z) {
+  etat.zone = z;
+  allerEtape('muscle');
+}
+
+function choisirMuscle(m) {
   etat.actif = m;
   const existant = etat.zones.get(m.id);
-  let sensation = existant?.sensation ?? 'tire';
-  let intensite = existant?.intensite ?? 0.5;
+  etat.brouillon = existant
+    ? { phrase: existant.phrase, sensation: existant.sensation, intensite: existant.intensite }
+    : { phrase: '', sensation: null, intensite: null };
+  allerEtape('phrase');
+}
 
-  dock.replaceChildren();
-  dock.append(elt('h2', '', m.nomAffiche));
-  dock.append(elt('p', 'region', REGIONS[m.region]));
+function modifierZone(id) {
+  const zone = etat.zones.get(id);
+  const m = MUSCLES.find(x => x.id === id);
+  etat.zone = { vue: zone.vue, moitie: zone.moitie };
+  choisirMuscle(m);
+}
 
-  dock.append(elt('p', 'titre-petit', "Qu'est-ce que tu ressens ?"));
-  const grille = elt('div', 'grille');
+// --- Bas de l'écran : zones déjà renseignées -------------------------------
+
+function afficherZonesDeja() {
+  if (etat.zones.size === 0) return;
+  dock.hidden = false;
+  dock.append(elt('p', 'titre-petit', 'Tes zones (touche-en une pour la modifier)'));
+  const liste = elt('div', 'zones');
+  for (const [id, z] of etat.zones) {
+    const m = MUSCLES.find(x => x.id === id);
+    const b = elt('button', 'zone', m.nomAffiche);
+    b.type = 'button';
+    b.append(elt('b', '', `${Math.round(z.intensite * 100)} %`));
+    b.addEventListener('click', () => modifierZone(id));
+    liste.append(b);
+  }
+  const envoyer = boutonEnvoyer();
+  envoyer.addEventListener('click', () => envoyerBilan(envoyer));
+  dock.append(liste, envoyer);
+}
+
+// --- Bas de l'écran : la phrase ---------------------------------------------
+
+function afficherPhrase() {
+  const m = etat.actif;
+  dock.append(elt('h2', '', m.nomAffiche), elt('p', 'region', REGIONS[m.region]));
+  dock.append(elt('p', 'consigne',
+    'Une phrase suffit. Par exemple : « Ça a commencé après une chute, ça tire le matin. »'));
+
+  const champ = document.createElement('textarea');
+  champ.maxLength = 220;
+  champ.placeholder = 'Écris ici, avec tes mots…';
+  champ.value = etat.brouillon.phrase;
+  champ.setAttribute('aria-label', "D'où vient la douleur et comment est-elle apparue");
+  dock.append(champ);
+
+  dock.append(elt('p', 'titre-petit', 'Comment tu la ressens ? (facultatif)'));
+  const liste = elt('div', 'liste-choix');
   const boutons = [];
   for (const [cle, libelle] of SENSATIONS) {
-    const b = elt('button', 'choix' + (cle === sensation ? ' actif' : ''), libelle);
+    const b = elt('button', 'choix' + (etat.brouillon.sensation === cle ? ' actif' : ''), libelle);
     b.type = 'button';
     b.addEventListener('click', () => {
-      sensation = cle;
-      boutons.forEach(x => x.classList.toggle('actif', x === b));
+      etat.brouillon.sensation = etat.brouillon.sensation === cle ? null : cle;
+      boutons.forEach(x => x.classList.remove('actif'));
+      if (etat.brouillon.sensation) b.classList.add('actif');
     });
     boutons.push(b);
-    grille.append(b);
+    liste.append(b);
   }
-  dock.append(grille);
+  dock.append(liste);
 
+  const valider = elt('button', 'bouton', 'Valider');
+  valider.type = 'button';
+  const majBouton = () => { valider.disabled = champ.value.trim().length < 3; };
+  champ.addEventListener('input', () => { etat.brouillon.phrase = champ.value; majBouton(); });
+  majBouton();
+  valider.addEventListener('click', () => {
+    etat.brouillon.phrase = champ.value.trim();
+    allerEtape('intensite');
+  });
+  const passer = elt('button', 'lien', 'Passer cette étape');
+  passer.type = 'button';
+  passer.addEventListener('click', () => { etat.brouillon.phrase = ''; allerEtape('intensite'); });
+  dock.append(valider, passer);
+}
+
+// --- Bas de l'écran : l'intensité -------------------------------------------
+
+function motIntensite(p) {
+  if (p < 20) return 'Gêne légère';
+  if (p < 40) return 'Gênante';
+  if (p < 60) return 'Douloureuse';
+  if (p < 80) return 'Forte';
+  return 'Très forte';
+}
+
+function afficherIntensite() {
+  const m = etat.actif;
+  dock.append(elt('h2', '', m.nomAffiche), elt('p', 'region', REGIONS[m.region]));
+
+  let touche = etat.brouillon.intensite !== null;
   const ligne = elt('div', 'ligne-intensite');
-  ligne.append(elt('p', 'titre-petit', 'Intensité'));
-  const sortie = elt('output', '', `${Math.round(intensite * 100)} %`);
-  ligne.append(sortie);
+  const sortie = elt('output', '', `${touche ? Math.round(etat.brouillon.intensite * 100) : 0} %`);
+  sortie.style.opacity = touche ? '1' : '0.4';
+  const mot = elt('span', 'mot', touche ? motIntensite(etat.brouillon.intensite * 100) : '');
+  ligne.append(sortie, mot);
   dock.append(ligne);
+
   const curseur = document.createElement('input');
   curseur.type = 'range'; curseur.min = '0'; curseur.max = '100'; curseur.step = '1';
-  curseur.value = String(Math.round(intensite * 100));
-  curseur.setAttribute('aria-label', 'Intensité de la douleur');
-  curseur.addEventListener('input', () => {
-    intensite = Number(curseur.value) / 100;
-    sortie.textContent = `${curseur.value} %`;
-  });
+  curseur.value = touche ? String(Math.round(etat.brouillon.intensite * 100)) : '0';
+  curseur.className = touche ? '' : 'neuf';
+  curseur.setAttribute('aria-label', 'Intensité de la douleur, de 0 à 100 pour cent');
   dock.append(curseur);
   const echelle = elt('div', 'echelle');
   echelle.append(elt('span', '', 'Gêne légère'), elt('span', '', 'Insupportable'));
   dock.append(echelle);
 
-  const rangee = elt('div', 'boutons');
-  if (existant) {
-    const retirer = elt('button', 'bouton contour', 'Retirer');
-    retirer.type = 'button';
-    retirer.addEventListener('click', () => { etat.zones.delete(m.id); fermerPlainte(true); });
-    rangee.append(retirer);
-  } else {
-    const annuler = elt('button', 'bouton contour', 'Annuler');
-    annuler.type = 'button';
-    annuler.addEventListener('click', () => fermerPlainte(true));
-    rangee.append(annuler);
-  }
-  const valider = elt('button', 'bouton', 'Valider');
-  valider.type = 'button';
-  valider.addEventListener('click', () => {
-    etat.zones.set(m.id, { sensation, intensite });
-    fermerPlainte(true);
-  });
-  rangee.append(valider);
-  dock.append(rangee);
+  const envoyer = boutonEnvoyer();
+  const ajouter = elt('button', 'lien', 'Ajouter une autre zone');
+  ajouter.type = 'button';
+  const peutAjouter = etat.zones.size + (etat.zones.has(m.id) ? 0 : 1) < ZONES_MAX;
+  ajouter.hidden = !peutAjouter;
 
-  rafraichirCouleurs();
-  $('#astuce').style.opacity = '0';
-  // La zone d'affichage rétrécit : on attend un instant, puis on cadre le muscle.
-  requestAnimationFrame(() => requestAnimationFrame(() => {
-    redimensionner();
-    const mesh = meshMuscles.find(x => x.userData.muscle.id === m.id);
-    if (mesh) focaliser(mesh);
-  }));
+  const debloquer = () => {
+    touche = true;
+    etat.brouillon.intensite = Number(curseur.value) / 100;
+    curseur.classList.remove('neuf');
+    sortie.textContent = `${curseur.value} %`;
+    sortie.style.opacity = '1';
+    mot.textContent = motIntensite(Number(curseur.value));
+    envoyer.disabled = false;
+    ajouter.disabled = false;
+    rafraichirCouleurs();
+  };
+  curseur.addEventListener('input', debloquer);
+  curseur.addEventListener('change', debloquer);
+  envoyer.disabled = !touche;
+  ajouter.disabled = !touche;
+
+  ajouter.addEventListener('click', () => { enregistrer(); etat.zone = null; allerEtape('zone'); });
+  envoyer.addEventListener('click', () => { enregistrer(); envoyerBilan(envoyer); });
+  dock.append(envoyer, ajouter);
 }
 
-function fermerPlainte(recadrer) {
-  etat.actif = null;
-  afficherZones();
-  rafraichirCouleurs();
-  if (recadrer) requestAnimationFrame(() => requestAnimationFrame(() => { redimensionner(); vueDensemble(); }));
+function enregistrer() {
+  etat.zones.set(etat.actif.id, {
+    sensation: etat.brouillon.sensation,
+    intensite: etat.brouillon.intensite,
+    phrase: etat.brouillon.phrase,
+    vue: etat.zone.vue,
+    moitie: etat.zone.moitie,
+  });
+}
+
+function boutonEnvoyer() {
+  const b = elt('button', 'bouton', 'Envoyer à mon kiné');
+  b.type = 'button';
+  b.style.width = '100%';
+  return b;
 }
 
 // ---------------------------------------------------------------------------
-// Écrans
+// Écrans et boutons
 // ---------------------------------------------------------------------------
 
 function montrer(nom) {
   $('#ecran-intro').hidden = nom !== 'intro';
-  $('#ecran-origine').hidden = nom !== 'origine';
   $('#ecran-envoye').hidden = nom !== 'envoye';
-  if (nom === 'origine') majBoutonEnvoi();
 }
 
 if (prenom) $('#titre-intro').textContent = `Bonjour ${prenom}, avant ton premier rendez-vous`;
 
-$('#bt-commencer').addEventListener('click', () => montrer('corps'));
-$('#bt-retour-corps').addEventListener('click', () => montrer('corps'));
-document.querySelectorAll('#vues button').forEach(b => b.addEventListener('click', () => versVue(b.dataset.vue)));
+$('#bt-commencer').addEventListener('click', () => { montrer('corps'); allerEtape('zone'); });
+$('#bt-retour').addEventListener('click', retour);
+document.querySelectorAll('#vues button').forEach(b => b.addEventListener('click', () => vueDensemble(b.dataset.vue)));
 
-function remplirChoix(conteneur, liste, cle) {
-  const boutons = [];
-  for (const [valeur, libelle] of liste) {
-    const b = elt('button', 'choix', libelle);
-    b.type = 'button';
-    b.addEventListener('click', () => {
-      etat[cle] = valeur;
-      boutons.forEach(x => x.classList.toggle('actif', x === b));
-      majBoutonEnvoi();
-    });
-    boutons.push(b);
-    conteneur.append(b);
-  }
-}
-remplirChoix($('#liste-origine'), ORIGINES, 'origine');
-remplirChoix($('#liste-depuis'), DEPUIS, 'depuis');
-
-function majBoutonEnvoi() {
-  $('#bt-envoyer').disabled = !(etat.origine && etat.depuis && etat.zones.size > 0);
+// Le clavier du téléphone réduit l'espace visible : on suit la zone réellement visible.
+if (window.visualViewport) {
+  const app = $('#app');
+  const ajuster = () => {
+    app.style.height = `${window.visualViewport.height}px`;
+    app.style.transform = `translateY(${window.visualViewport.offsetTop}px)`;
+  };
+  window.visualViewport.addEventListener('resize', ajuster);
+  window.visualViewport.addEventListener('scroll', ajuster);
 }
 
 // ---------------------------------------------------------------------------
@@ -406,36 +579,34 @@ function base64Url(texte) {
 
 function construireBilan() {
   return {
-    v: 1,
+    v: 2,
     prenom: prenom || null,
-    origine: etat.origine,
-    depuis: etat.depuis,
-    note: $('#note').value.trim(),
     plaintes: [...etat.zones.entries()].map(([muscle, z]) => ({
-      muscle, sensation: z.sensation, intensite: Math.round(z.intensite * 100) / 100,
+      muscle,
+      partie: `${z.vue}-${z.moitie}`,
+      sensation: z.sensation,
+      intensite: Math.round(z.intensite * 100) / 100,
+      phrase: z.phrase,
     })),
   };
 }
 
-$('#bt-envoyer').addEventListener('click', () => {
-  const bouton = $('#bt-envoyer');
+function envoyerBilan(bouton) {
   bouton.disabled = true;
   bouton.textContent = 'Envoi en cours…';
   const bilan = construireBilan();
   setTimeout(() => {
-    const charge = base64Url(JSON.stringify(bilan));
-    $('#lien-retour').href = `kpuls://bilan?d=${charge}`;
+    $('#lien-retour').href = `kpuls://bilan?d=${base64Url(JSON.stringify(bilan))}`;
     if (modeDebug) {
       const debug = $('#debug');
       debug.hidden = false;
       debug.textContent = JSON.stringify(bilan, null, 2);
     }
-    bouton.textContent = 'Envoyer à mon kiné';
     montrer('envoye');
   }, 900);
-});
+}
 
-// Démarrage : on montre l'accueil, le corps est déjà prêt derrière.
+// Démarrage : l'accueil, le corps est déjà prêt derrière.
 montrer('intro');
-afficherZones();
-rafraichirCouleurs();
+bulle.hidden = true;
+dock.hidden = true;

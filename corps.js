@@ -29,7 +29,7 @@ export const REGIONS = {
 //   th     angle autour du segment, en degrés, pour le côté gauche du patient
 //          (90 = devant, 270 = derrière, 0 = vers l'extérieur gauche)
 //   dx     largeur, dy longueur, dz épaisseur de la forme du muscle (en mètres)
-//   lean   inclinaison des fibres, en degrés
+//   lean   inclinaison des fibres, en degrés (positif = le haut penche vers l'extérieur)
 // Le côté droit est le miroir du côté gauche.
 const DEFS = [
   // ---------------- FACE ----------------
@@ -76,7 +76,7 @@ const DEFS = [
   { base: "trapèze moyen", court: "trapèze", vue: "dos", region: "hautDuDos",
     part: "torse", u: 0.268, th: 288, dx: 0.1, dy: 0.05, dz: 0.028, lean: 0 },
   { base: "trapèze inférieur", court: "trapèze", vue: "dos", region: "hautDuDos",
-    part: "torse", u: 0.464, th: 282, dx: 0.05, dy: 0.12, dz: 0.026, lean: -15 },
+    part: "torse", u: 0.464, th: 282, dx: 0.05, dy: 0.12, dz: 0.026, lean: 15 },
   { base: "deltoïde postérieur", court: "épaule", vue: "dos", region: "epaule",
     part: "bras", u: 0.12, th: 310, dx: 0.04, dy: 0.07, dz: 0.03, lean: 0 },
   { base: "infra-épineux", court: "omoplate", vue: "dos", region: "hautDuDos",
@@ -84,9 +84,9 @@ const DEFS = [
   { base: "grand rond", court: "omoplate", vue: "dos", region: "hautDuDos",
     part: "torse", u: 0.43, th: 338, dx: 0.05, dy: 0.04, dz: 0.024, lean: 30 },
   { base: "rhomboïdes", court: "omoplates", vue: "dos", region: "hautDuDos",
-    part: "torse", u: 0.286, th: 278, dx: 0.04, dy: 0.08, dz: 0.022, lean: 20 },
+    part: "torse", u: 0.286, th: 278, dx: 0.04, dy: 0.08, dz: 0.022, lean: -20 },
   { base: "grand dorsal", court: "dorsaux", vue: "dos", region: "hautDuDos",
-    part: "torse", u: 0.571, th: 315, dx: 0.085, dy: 0.17, dz: 0.03, lean: -30 },
+    part: "torse", u: 0.571, th: 315, dx: 0.085, dy: 0.17, dz: 0.03, lean: 30 },
   { base: "triceps brachial", court: "triceps", vue: "dos", region: "bras",
     part: "bras", u: 0.45, th: 270, dx: 0.035, dy: 0.12, dz: 0.03, lean: 0 },
   { base: "extenseurs de l'avant-bras", court: "avant-bras", vue: "dos", region: "avantBras",
@@ -236,6 +236,7 @@ export function construireCorps() {
   const geoSphere = new THREE.SphereGeometry(1, 24, 16);
 
   const groupes = {};   // 'torse', 'cou', 'cuisse+1', ...
+  const parties = [];   // toutes les pièces du corps hors muscles (pour savoir où on touche)
 
   function ajouterSegment(nom, seg) {
     const L = seg.haut.distanceTo(seg.bas);
@@ -244,6 +245,7 @@ export function construireCorps() {
     const dir = seg.haut.clone().sub(seg.bas).normalize();
     g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
     const mesh = new THREE.Mesh(geometrieSegment(seg, L), matCorps);
+    parties.push(mesh);
     g.add(mesh);
     corps.add(g);
     groupes[nom] = { groupe: g, seg, L };
@@ -261,6 +263,7 @@ export function construireCorps() {
   tete.scale.set(0.085, 0.105, 0.095);
   tete.position.set(0, 1.63, 0.005);
   corps.add(tete);
+  parties.push(tete);
   const nez = new THREE.Mesh(geoSphere, matCorps);
   nez.scale.set(0.014, 0.02, 0.02);
   nez.position.set(0, 1.615, 0.098);
@@ -271,10 +274,12 @@ export function construireCorps() {
     main.position.set(s * 0.337, 0.79, 0.005);
     main.rotation.z = -s * 0.12;
     corps.add(main);
+    parties.push(main);
     const pied = new THREE.Mesh(geoSphere, matCorps);
     pied.scale.set(0.038, 0.032, 0.085);
     pied.position.set(s * 0.07, 0.035, 0.04);
     corps.add(pied);
+    parties.push(pied);
   }
 
   // Muscles.
@@ -286,7 +291,10 @@ export function construireCorps() {
     // Côté gauche : angle tel quel. Côté droit : miroir, 180 - angle.
     const thDeg = s === -1 ? 180 - m.th : m.th;
     const th = THREE.MathUtils.degToRad(thDeg);
-    const lean = THREE.MathUtils.degToRad(s === -1 ? -m.lean : m.lean);
+    // Inclinaison positive = le haut du muscle penche vers l'extérieur du corps.
+    // Vu de face ou de dos, la même rotation ne penche pas du même côté : on corrige.
+    const signe = (m.vue === 'face' ? -1 : 1) * (s === -1 ? -1 : 1);
+    const lean = THREE.MathUtils.degToRad(signe * m.lean);
 
     const [a, b] = interpolerProfil(seg.profil, m.u);
     const pos = new THREE.Vector3(a * Math.cos(th), (1 - m.u) * L, b * Math.sin(th));
@@ -313,5 +321,5 @@ export function construireCorps() {
   }
 
   corps.updateMatrixWorld(true);
-  return { corps, meshMuscles };
+  return { corps, meshMuscles, parties };
 }
