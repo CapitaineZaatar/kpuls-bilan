@@ -96,6 +96,15 @@
   h2 { margin: 0; font-size: 20px; font-weight: 700; }
   .region { margin: 2px 0 10px; font-size: 13px; color: var(--texte-doux); }
   .consigne { margin: 0 0 10px; font-size: 14px; line-height: 1.4; color: var(--texte-doux); }
+  .question { margin-bottom: 16px; }
+  .question-titre { margin: 0 0 8px; font-size: 15px; font-weight: 600; line-height: 1.35; }
+  .oui-non { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .oui-non .choix { text-align: center; }
+  .precision {
+    width: 100%; margin-top: 8px; border: 1px solid var(--trait); background: var(--carte);
+    border-radius: 14px; padding: 12px; font: inherit; font-size: 16px; color: var(--blanc);
+  }
+  .precision::placeholder { color: rgba(255, 255, 255, 0.4); }
   .liste-choix { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
   .choix {
     border: 1px solid var(--trait); background: var(--carte); border-radius: 999px;
@@ -162,7 +171,7 @@
       <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
     </button>
     <h1 id="titre-etape">Où as-tu mal ?</h1>
-    <div id="points" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+    <div id="points" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
   </header>
 
   <div id="bulle" role="status"></div>

@@ -5,7 +5,8 @@
 //   1. la partie du corps (face ou dos, haut ou bas)
 //   2. le muscle, une fois la zone agrandie
 //   3. une phrase pour dire d'où vient la douleur et comment elle est apparue
-//   4. l'intensité, en pourcentage, puis l'envoi
+//   4. l'intensité, en pourcentage
+//   5. trois questions de sécurité (allergie, grossesse, traitement), puis l'envoi
 
 import { MUSCLES, DECORS, CADRES, REGIONS, SEUIL_HAUT_BAS, CENTRE_ZONE } from './donnees.js';
 
@@ -17,10 +18,10 @@ const SENSATIONS = [
   ['tire', 'Ça tire'], ['brule', 'Ça brûle'], ['lance', 'Ça lance'],
   ['transperce', 'Ça transperce'], ['raideur', 'Raideur'], ['fourmillements', 'Fourmillements'],
 ];
-const ETAPES = ['zone', 'muscle', 'phrase', 'intensite'];
+const ETAPES = ['zone', 'muscle', 'phrase', 'intensite', 'securite'];
 const TITRES = {
   zone: 'Où as-tu mal ?', muscle: 'Quel muscle ?',
-  phrase: 'Raconte-nous', intensite: 'Ta douleur',
+  phrase: 'Raconte-nous', intensite: 'Ta douleur', securite: 'Ta sécurité',
 };
 const ZONES_MAX = 3;
 // SEUIL_HAUT_BAS : hauteur normalisée du cadre qui sépare le haut du bas du corps
@@ -40,6 +41,8 @@ const etat = {
   actif: null,           // muscle en cours de saisie
   brouillon: null,       // { phrase, sensation, intensite }
   zones: new Map(),      // id du muscle -> { sensation, intensite, phrase }
+  // Réponses aux questions de sécurité (null = pas encore répondu).
+  securite: { allergie: null, allergiePrecision: '', grossesse: null, traitement: null, traitementPrecision: '' },
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -310,7 +313,7 @@ function allerEtape(nom) {
     etat.brouillon = null;
     dire(etat.zones.size === 0
       ? 'Touche la partie de ton corps qui te fait mal.'
-      : 'Tu peux ajouter une autre zone, ou envoyer ton bilan.',
+      : 'Tu peux ajouter une autre zone, ou passer à la suite.',
       etat.zones.size === 0 ? 'Choisis Face ou Dos, puis touche le haut ou le bas du corps.' : null);
     afficherZonesDeja();
     dessiner();
@@ -333,8 +336,19 @@ function allerEtape(nom) {
     dire("Dis-nous en une phrase d'où ça vient et comment c'est apparu.");
     afficherPhrase();
   } else if (nom === 'intensite') {
-    dire('Dernière étape : à combien évalues-tu ta douleur ?', 'Fais glisser le curseur.');
+    dire('À combien évalues-tu ta douleur ?', 'Fais glisser le curseur.');
     afficherIntensite();
+  } else if (nom === 'securite') {
+    // Les zones signalées restent visibles, corps entier, pendant les questions.
+    etat.actif = null;
+    etat.brouillon = null;
+    dire("Dernière étape : trois questions pour bien t'accompagner.",
+      "Ton kiné s'en sert pour vérifier que tout est adapté à toi.");
+    afficherSecurite();
+    dock.hidden = false;
+    dessiner();
+    apresMiseEnPage(cadrerCorps);
+    return;
   }
   dock.hidden = false;
   changerVue(etat.actif.vue);
@@ -345,6 +359,7 @@ function allerEtape(nom) {
 function retour() {
   if (etat.etape === 'phrase') allerEtape('muscle');
   else if (etat.etape === 'intensite') allerEtape('phrase');
+  else if (etat.etape === 'securite') { etat.zone = null; allerEtape('zone'); }
   else if (etat.etape === 'muscle') { etat.zone = null; allerEtape('zone'); }
 }
 
@@ -383,9 +398,9 @@ function afficherZonesDeja() {
     b.addEventListener('click', () => modifierZone(id));
     liste.append(b);
   }
-  const envoyer = boutonEnvoyer();
-  envoyer.addEventListener('click', () => envoyerBilan(envoyer));
-  dock.append(liste, envoyer);
+  const suite = boutonContinuer();
+  suite.addEventListener('click', () => allerEtape('securite'));
+  dock.append(liste, suite);
 }
 
 // --- Bas de l'écran : la phrase ---------------------------------------------
@@ -466,7 +481,7 @@ function afficherIntensite() {
   echelle.append(elt('span', '', 'Gêne légère'), elt('span', '', 'Insupportable'));
   dock.append(echelle);
 
-  const envoyer = boutonEnvoyer();
+  const suite = boutonContinuer();
   const ajouter = elt('button', 'lien', 'Ajouter une autre zone');
   ajouter.type = 'button';
   ajouter.hidden = !(etat.zones.size + (etat.zones.has(m.id) ? 0 : 1) < ZONES_MAX);
@@ -478,17 +493,66 @@ function afficherIntensite() {
     sortie.textContent = `${curseur.value} %`;
     sortie.style.opacity = '1';
     mot.textContent = motIntensite(Number(curseur.value));
-    envoyer.disabled = false;
+    suite.disabled = false;
     ajouter.disabled = false;
   };
   curseur.addEventListener('input', debloquer);
   curseur.addEventListener('change', debloquer);
-  envoyer.disabled = !touche;
+  suite.disabled = !touche;
   ajouter.disabled = !touche;
 
   ajouter.addEventListener('click', () => { enregistrer(); etat.zone = null; allerEtape('zone'); });
-  envoyer.addEventListener('click', () => { enregistrer(); envoyerBilan(envoyer); });
-  dock.append(envoyer, ajouter);
+  suite.addEventListener('click', () => { enregistrer(); allerEtape('securite'); });
+  dock.append(suite, ajouter);
+}
+
+// --- Bas de l'écran : les questions de sécurité -------------------------------
+
+function questionOuiNon(titre, cle, invite, clePrecision, maj) {
+  const s = etat.securite;
+  const bloc = elt('div', 'question');
+  bloc.append(elt('p', 'question-titre', titre));
+  const rangee = elt('div', 'oui-non');
+  let champ = null;
+  if (invite) {
+    champ = document.createElement('input');
+    champ.type = 'text'; champ.className = 'precision'; champ.maxLength = 120;
+    champ.placeholder = invite;
+    champ.value = s[clePrecision];
+    champ.hidden = s[cle] !== true;
+    champ.addEventListener('input', () => { s[clePrecision] = champ.value; });
+  }
+  const boutons = [];
+  for (const [valeur, libelle] of [[false, 'Non'], [true, 'Oui']]) {
+    const b = elt('button', 'choix' + (s[cle] === valeur ? ' actif' : ''), libelle);
+    b.type = 'button';
+    b.addEventListener('click', () => {
+      s[cle] = valeur;
+      boutons.forEach(x => x.classList.remove('actif'));
+      b.classList.add('actif');
+      if (champ) champ.hidden = valeur !== true;
+      maj();
+    });
+    boutons.push(b);
+    rangee.append(b);
+  }
+  bloc.append(rangee);
+  if (champ) bloc.append(champ);
+  return bloc;
+}
+
+function afficherSecurite() {
+  const s = etat.securite;
+  const envoyer = boutonEnvoyer();
+  const maj = () => { envoyer.disabled = s.allergie === null || s.grossesse === null || s.traitement === null; };
+  dock.append(
+    questionOuiNon('As-tu une allergie connue à un médicament ?', 'allergie', 'Laquelle ? (facultatif)', 'allergiePrecision', maj),
+    questionOuiNon('Es-tu enceinte ou allaites-tu ?', 'grossesse', null, null, maj),
+    questionOuiNon('Prends-tu déjà un traitement ? (même sans ordonnance)', 'traitement', 'Lequel ? (facultatif)', 'traitementPrecision', maj),
+    envoyer,
+  );
+  maj();
+  envoyer.addEventListener('click', () => envoyerBilan(envoyer));
 }
 
 function enregistrer() {
@@ -497,6 +561,12 @@ function enregistrer() {
     intensite: etat.brouillon.intensite,
     phrase: etat.brouillon.phrase,
   });
+}
+
+function boutonContinuer() {
+  const b = elt('button', 'bouton', 'Continuer');
+  b.type = 'button';
+  return b;
 }
 
 function boutonEnvoyer() {
@@ -546,6 +616,13 @@ function construireBilan() {
   return {
     v: 3,
     prenom: prenom || null,
+    securite: {
+      allergie: etat.securite.allergie === true,
+      allergiePrecision: etat.securite.allergie ? etat.securite.allergiePrecision.trim() : '',
+      grossesse: etat.securite.grossesse === true,
+      traitement: etat.securite.traitement === true,
+      traitementPrecision: etat.securite.traitement ? etat.securite.traitementPrecision.trim() : '',
+    },
     plaintes: [...etat.zones.entries()].map(([muscle, z]) => ({
       muscle,
       partie: `${parId[muscle].vue}-${moitieDe(parId[muscle])}`,
