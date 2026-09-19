@@ -7,7 +7,7 @@
 //   3. une phrase pour dire d'où vient la douleur et comment elle est apparue
 //   4. l'intensité, en pourcentage, puis l'envoi
 
-import { MUSCLES, MASQUES, REGIONS } from './donnees.js';
+import { MUSCLES, DECORS, CADRES, REGIONS, SEUIL_HAUT_BAS, CENTRE_ZONE } from './donnees.js';
 
 // ---------------------------------------------------------------------------
 // Réglages (identiques à ParcoursGuide.swift et PlancheAnatomique.swift)
@@ -23,17 +23,11 @@ const TITRES = {
   phrase: 'Raconte-nous', intensite: 'Ta douleur',
 };
 const ZONES_MAX = 3;
-const SEUIL_HAUT_BAS = 0.44;   // hauteur normalisée qui sépare le haut du bas du corps
-const LARGEUR = 620, HAUTEUR = 952;   // dimensions de l'image de la planche
+// SEUIL_HAUT_BAS : hauteur normalisée du cadre qui sépare le haut du bas du corps
+// (le niveau des hanches), calculée sur le dessin avec le catalogue.
+const LARGEUR = CADRES.face.l, HAUTEUR = CADRES.face.h;   // taille du cadre d'une vue
 const TOLERANCE_DOIGT = 35;    // rattrapage d'un toucher approximatif, en pixels écran
-
-// Forme de repli des muscles que le dessin ne sépare pas, par région (largeur, hauteur).
-const ELLIPSES = {
-  nuque: [0.05, 0.10], avantBras: [0.05, 0.10], bras: [0.07, 0.12],
-  epaule: [0.09, 0.08], hautDuDos: [0.09, 0.08], bassin: [0.09, 0.08],
-  thorax: [0.10, 0.09], abdomen: [0.10, 0.09], lombaires: [0.05, 0.12],
-  cuisse: [0.08, 0.16], jambe: [0.07, 0.14],
-};
+const CLAIR = '#96dbfa', NUIT = '#3a4080';   // muscles bleu clair sur fond bleu nuit
 
 const params = new URLSearchParams(location.search);
 const prenom = (params.get('p') || '').trim().slice(0, 30);
@@ -60,13 +54,14 @@ const musclesDe = (vue) => MUSCLES.filter(m => m.vue === vue);
 const parId = Object.fromEntries(MUSCLES.map(m => [m.id, m]));
 
 // ---------------------------------------------------------------------------
-// La planche : image, contours, zoom
+// La planche : corps vectoriel, zoom
 // ---------------------------------------------------------------------------
 
 const NS = 'http://www.w3.org/2000/svg';
 const svg = $('#planche');
-const couche = $('#couche');
-const image = $('#img-planche');
+const repere = $('#repere');   // décale les tracés pour que le cadre de la vue parte de 0,0
+const corps = $('#corps');     // la silhouette : tous les muscles
+const couche = $('#couche');   // la surbrillance corail par-dessus
 const zoneScene = $('#scene');
 
 let cadre = { cx: 0.5, cy: 0.5, s: 1 };   // centre normalisé et niveau de zoom
@@ -117,8 +112,7 @@ function apresMiseEnPage(fn) {
 function cadrerCorps() { allerAu({ cx: 0.5, cy: 0.5, s: 1 }); }
 
 function cadrerZone(z) {
-  const cy = z.moitie === 'haut' ? 0.25 : 0.70;
-  allerAu(borner(0.5, cy, 1.55));
+  allerAu(borner(0.5, CENTRE_ZONE[z.moitie], 1.55));
 }
 
 function cadrerMuscle(m) {
@@ -126,71 +120,58 @@ function cadrerMuscle(m) {
 }
 
 function changerVue(vue) {
+  const change = vue !== vueDessinee;
   etat.vue = vue;
-  image.setAttribute('href', `img/anatomie-${vue}.png`);
   document.querySelectorAll('#vues button').forEach(b => b.classList.toggle('actif', b.dataset.vue === vue));
+  if (change) construireCorps();
   dessiner();
 }
 
-// --- Contours ---------------------------------------------------------------
+// --- Le corps ---------------------------------------------------------------
 
-function polygones(id) {
-  const brut = (MASQUES[id] || []).filter(p => p.length > 4);
-  const polys = brut.map(plat => {
-    const pts = [];
-    for (let i = 0; i < plat.length; i += 2) pts.push([plat[i], plat[i + 1]]);
-    return pts;
-  });
-  const aire = (poly) => {
-    const xs = poly.map(p => p[0]), ys = poly.map(p => p[1]);
-    return (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
-  };
-  const aireMax = Math.max(0, ...polys.map(aire));
-  // Les fragments minuscules (parasites de découpage) sont écartés.
-  return polys.filter(p => aire(p) >= 0.22 * aireMax);
-}
-
-const polygonesCache = new Map();
-function polygonesDe(id) {
-  if (!polygonesCache.has(id)) polygonesCache.set(id, polygones(id));
-  return polygonesCache.get(id);
-}
-
-function pointDans(poly, x, y) {
-  let dedans = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const [xi, yi] = poly[i], [xj, yj] = poly[j];
-    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) dedans = !dedans;
+function trace(d, remplissage, contour, epaisseur) {
+  const e = document.createElementNS(NS, 'path');
+  e.setAttribute('d', d);
+  e.setAttribute('fill', remplissage);
+  if (contour) {
+    e.setAttribute('stroke', contour);
+    e.setAttribute('stroke-width', epaisseur);
+    e.setAttribute('stroke-linejoin', 'round');
   }
-  return dedans;
+  return e;
 }
 
-const contient = (m, x, y) => polygonesDe(m.id).some(p => pointDans(p, x, y));
+let vueDessinee = null;
+const formesParId = new Map();   // id du muscle -> tracés de la vue affichée
 
-function formes(m) {
-  const polys = polygonesDe(m.id);
-  if (polys.length) {
-    return polys.map(p => {
-      const e = document.createElementNS(NS, 'path');
-      e.setAttribute('d', 'M' + p.map(([x, y]) => `${(x * LARGEUR).toFixed(1)},${(y * HAUTEUR).toFixed(1)}`).join('L') + 'Z');
-      return e;
-    });
+// Tête, puis chaque muscle. Les muscles se touchent presque : le trait bleu nuit
+// fait les séparations, comme sur une planche de SVT.
+function construireCorps() {
+  vueDessinee = etat.vue;
+  const c = CADRES[etat.vue];
+  repere.setAttribute('transform', `translate(${-c.x} ${-c.y})`);
+  corps.replaceChildren();
+  formesParId.clear();
+  for (const d of DECORS[etat.vue]) corps.append(trace(d, NUIT));
+  for (const m of musclesDe(etat.vue)) {
+    const els = m.formes.map(d => trace(d, CLAIR, NUIT, 2.2));
+    formesParId.set(m.id, els);
+    corps.append(...els);
   }
-  const [w, h] = ELLIPSES[m.region] || [0.08, 0.1];
-  const e = document.createElementNS(NS, 'ellipse');
-  e.setAttribute('cx', m.centre[0] * LARGEUR);
-  e.setAttribute('cy', m.centre[1] * HAUTEUR);
-  e.setAttribute('rx', (w / 2) * LARGEUR);
-  e.setAttribute('ry', (h / 2) * HAUTEUR);
-  return [e];
+}
+
+// --- Surbrillance et toucher ---------------------------------------------
+
+// Le point normalisé (0…1 dans le cadre) tombe-t-il dans une des pièces du muscle ?
+function contient(m, nx, ny) {
+  const c = CADRES[m.vue];
+  const pt = new DOMPoint(c.x + nx * LARGEUR, c.y + ny * HAUTEUR);
+  return (formesParId.get(m.id) || []).some(p => p.isPointInFill(pt));
 }
 
 function peindre(m, remplissage, contour, epaisseur, classe) {
-  for (const f of formes(m)) {
-    f.setAttribute('fill', remplissage);
-    f.setAttribute('stroke', contour);
-    f.setAttribute('stroke-width', epaisseur);
-    f.setAttribute('stroke-linejoin', 'round');
+  for (const d of m.formes) {
+    const f = trace(d, remplissage, contour, epaisseur);
     if (classe) f.setAttribute('class', classe);
     couche.append(f);
   }
@@ -248,10 +229,8 @@ function pointNormalise(cx, cy) {
   return [p.x / LARGEUR, p.y / HAUTEUR];
 }
 
-// Parmi les muscles dont le contour contient le doigt, le plus proche du doigt
-// par son centre. Les contours se chevauchent (près d'un point sur cinq), et
-// prendre simplement le premier de la liste donnerait souvent le mauvais côté
-// ou le mauvais muscle voisin.
+// Parmi les muscles dont une forme contient le doigt, le plus proche du doigt
+// par son centre (si des formes se chevauchent, on prend le bon côté et le bon muscle).
 function muscleSousLeDoigt(nx, ny, candidats) {
   const touches = candidats.filter(m => contient(m, nx, ny));
   if (!touches.length) return null;
@@ -280,14 +259,16 @@ function toucher(cx, cy) {
     const deja = muscleSousLeDoigt(nx, ny, musclesDe(etat.vue).filter(m => etat.zones.has(m.id)));
     if (deja) { modifierZone(deja.id); return; }
     // Sinon, le doigt désigne une partie du corps : haut ou bas, face ou dos.
-    if (nx < 0.06 || nx > 0.94 || ny < 0.01 || ny > 0.99) return;
+    if (nx < 0.02 || nx > 0.98 || ny < 0 || ny > 1) return;
     choisirZone({ vue: etat.vue, moitie: ny < SEUIL_HAUT_BAS ? 'haut' : 'bas' });
     return;
   }
 
   if (etat.etape === 'muscle') {
-    const candidats = musclesDe(etat.zone.vue).filter(m => moitieDe(m) === etat.zone.moitie);
-    const direct = muscleSousLeDoigt(nx, ny, candidats) || muscleProche(nx, ny, candidats);
+    // Les formes comptent même au-delà de la moitié choisie (les mains sont au niveau des hanches).
+    const tous = musclesDe(etat.zone.vue);
+    const candidats = tous.filter(m => moitieDe(m) === etat.zone.moitie);
+    const direct = muscleSousLeDoigt(nx, ny, tous) || muscleProche(nx, ny, candidats);
     if (direct) choisirMuscle(direct);
   }
 }
@@ -563,7 +544,7 @@ function base64Url(texte) {
 
 function construireBilan() {
   return {
-    v: 2,
+    v: 3,
     prenom: prenom || null,
     plaintes: [...etat.zones.entries()].map(([muscle, z]) => ({
       muscle,
@@ -591,6 +572,8 @@ function envoyerBilan(bouton) {
 }
 
 // Démarrage : l'accueil, la planche est déjà prête derrière.
+construireCorps();
+dessiner();
 montrer('intro');
 bulle.hidden = true;
 dock.hidden = true;

@@ -169,8 +169,10 @@
 
   <main id="scene">
     <svg id="planche" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Carte anatomique du corps">
-      <image id="img-planche" href="img/anatomie-face.png" x="0" y="0" width="620" height="952"/>
-      <g id="couche"></g>
+      <g id="repere">
+        <g id="corps"></g>
+        <g id="couche"></g>
+      </g>
     </svg>
     <div id="vues" role="group" aria-label="Vue du corps">
       <button type="button" data-vue="face" class="actif">Face</button>
