@@ -1,34 +1,39 @@
 // Le questionnaire de douleur de KPULS, en parcours guidé.
 //
-// Une seule question à l'écran à la fois, pour que le patient se sente accompagné :
+// C'est le même parcours, la même carte anatomique et les mêmes règles de zoom
+// que dans l'appli (écran « 1er RDV »). Une seule question à l'écran à la fois :
 //   1. la partie du corps (face ou dos, haut ou bas)
 //   2. le muscle, une fois la zone agrandie
 //   3. une phrase pour dire d'où vient la douleur et comment elle est apparue
 //   4. l'intensité, en pourcentage, puis l'envoi
 
-import * as THREE from 'three';
-import { OrbitControls } from './vendor/OrbitControls.js';
-import { construireCorps, MUSCLES, REGIONS } from './corps.js';
+import { MUSCLES, MASQUES, REGIONS } from './donnees.js';
 
 // ---------------------------------------------------------------------------
-// Données
+// Réglages (identiques à ParcoursGuide.swift et PlancheAnatomique.swift)
 // ---------------------------------------------------------------------------
 
 const SENSATIONS = [
   ['tire', 'Ça tire'], ['brule', 'Ça brûle'], ['lance', 'Ça lance'],
   ['transperce', 'Ça transperce'], ['raideur', 'Raideur'], ['fourmillements', 'Fourmillements'],
 ];
-const NOMS_PARTIE = {
-  'face-haut': 'Face, haut du corps', 'face-bas': 'Face, bas du corps',
-  'dos-haut': 'Dos, haut du corps', 'dos-bas': 'Dos, bas du corps',
-};
 const ETAPES = ['zone', 'muscle', 'phrase', 'intensite'];
 const TITRES = {
   zone: 'Où as-tu mal ?', muscle: 'Quel muscle ?',
   phrase: 'Raconte-nous', intensite: 'Ta douleur',
 };
 const ZONES_MAX = 3;
-const SEUIL_HAUT_BAS = 1.0;   // hauteur du corps (en mètres) qui sépare le haut du bas
+const SEUIL_HAUT_BAS = 0.44;   // hauteur normalisée qui sépare le haut du bas du corps
+const LARGEUR = 620, HAUTEUR = 952;   // dimensions de l'image de la planche
+const TOLERANCE_DOIGT = 35;    // rattrapage d'un toucher approximatif, en pixels écran
+
+// Forme de repli des muscles que le dessin ne sépare pas, par région (largeur, hauteur).
+const ELLIPSES = {
+  nuque: [0.05, 0.10], avantBras: [0.05, 0.10], bras: [0.07, 0.12],
+  epaule: [0.09, 0.08], hautDuDos: [0.09, 0.08], bassin: [0.09, 0.08],
+  thorax: [0.10, 0.09], abdomen: [0.10, 0.09], lombaires: [0.05, 0.12],
+  cuisse: [0.08, 0.16], jambe: [0.07, 0.14],
+};
 
 const params = new URLSearchParams(location.search);
 const prenom = (params.get('p') || '').trim().slice(0, 30);
@@ -36,10 +41,11 @@ const modeDebug = params.has('debug');
 
 const etat = {
   etape: 'zone',
+  vue: 'face',
   zone: null,            // { vue, moitie } de la partie du corps choisie
   actif: null,           // muscle en cours de saisie
   brouillon: null,       // { phrase, sensation, intensite }
-  zones: new Map(),      // id du muscle -> { sensation, intensite, phrase, vue, moitie }
+  zones: new Map(),      // id du muscle -> { sensation, intensite, phrase }
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -49,254 +55,226 @@ function elt(tag, classe, texte) {
   if (texte !== undefined) e.textContent = texte;
   return e;
 }
+const moitieDe = (m) => (m.centre[1] < SEUIL_HAUT_BAS ? 'haut' : 'bas');
+const musclesDe = (vue) => MUSCLES.filter(m => m.vue === vue);
+const parId = Object.fromEntries(MUSCLES.map(m => [m.id, m]));
 
 // ---------------------------------------------------------------------------
-// Scène 3D
+// La planche : image, contours, zoom
 // ---------------------------------------------------------------------------
 
+const NS = 'http://www.w3.org/2000/svg';
+const svg = $('#planche');
+const couche = $('#couche');
+const image = $('#img-planche');
 const zoneScene = $('#scene');
-const toile = $('#toile');
-const renderer = new THREE.WebGLRenderer({ canvas: toile, antialias: true, alpha: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-renderer.setClearColor(0x000000, 0);
 
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 30);
-scene.add(camera);
-scene.add(new THREE.HemisphereLight(0xffffff, 0x2a3f57, 1.05));
-const lumiere = new THREE.DirectionalLight(0xffffff, 1.35);
-lumiere.position.set(0.6, 0.9, 1);
-camera.add(lumiere);
+let cadre = { cx: 0.5, cy: 0.5, s: 1 };   // centre normalisé et niveau de zoom
+let animation = null;
 
-const { corps, meshMuscles, parties } = construireCorps();
-scene.add(corps);
-
-// Chaque muscle sait dans quelle moitié du corps il se trouve.
-{
-  const p = new THREE.Vector3();
-  for (const mesh of meshMuscles) {
-    mesh.getWorldPosition(p);
-    mesh.userData.moitie = p.y >= SEUIL_HAUT_BAS ? 'haut' : 'bas';
-    mesh.visible = false;
-  }
+function appliquerCadre(c) {
+  const largeurEcran = zoneScene.clientWidth, hauteurEcran = zoneScene.clientHeight;
+  if (!largeurEcran || !hauteurEcran) return;
+  const ratio = largeurEcran / hauteurEcran;
+  const h0 = Math.max(HAUTEUR, LARGEUR / ratio), w0 = h0 * ratio;
+  const w = w0 / c.s, h = h0 / c.s;
+  svg.setAttribute('viewBox', `${c.cx * LARGEUR - w / 2} ${c.cy * HAUTEUR - h / 2} ${w} ${h}`);
 }
 
-const CENTRE = new THREE.Vector3(0, 1.0, 0);
-const controles = new OrbitControls(camera, toile);
-controles.enableDamping = true;
-controles.dampingFactor = 0.09;
-controles.rotateSpeed = 0.9;
-controles.minDistance = 0.7;
-controles.maxDistance = 4.6;
-controles.minPolarAngle = 0.55;
-controles.maxPolarAngle = 2.0;
-controles.screenSpacePanning = true;
-controles.target.copy(CENTRE);
-
-const TAN_DEMI_FOV = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-
-function distanceEnsemble() {
-  return Math.max(2.1 / (2 * TAN_DEMI_FOV), 0.95 / (2 * TAN_DEMI_FOV * camera.aspect));
+// Garde le zoom dans les limites du corps, comme dans l'appli.
+function borner(cx, cy, s) {
+  const demi = 0.5 / s;
+  return { cx: Math.min(1 - demi, Math.max(demi, cx)), cy: Math.min(1 - demi, Math.max(demi, cy)), s };
 }
 
-function positionCamera(azimut, cible, distance, hauteur = 0.16) {
-  return new THREE.Vector3(
-    cible.x + Math.sin(azimut) * distance,
-    cible.y + hauteur * distance,
-    cible.z + Math.cos(azimut) * distance,
-  );
-}
-
-camera.position.copy(positionCamera(0, CENTRE, distanceEnsemble()));
-controles.update();
-
-let anim = null;
-function animerVers(position, cible, duree = 700) {
-  anim = {
-    t0: performance.now(), duree,
-    p0: camera.position.clone(), p1: position.clone(),
-    c0: controles.target.clone(), c1: cible.clone(),
-  };
-}
-
-function vueCourante() {
-  const d = camera.position.clone().sub(controles.target);
-  return d.z >= 0 ? 'face' : 'dos';
-}
-
-function surlignerVue(vue) {
-  document.querySelectorAll('#vues button').forEach(b => b.classList.toggle('actif', b.dataset.vue === vue));
-}
-
-function vueDensemble(vue = vueCourante()) {
-  surlignerVue(vue);
-  const a = vue === 'face' ? 0 : Math.PI;
-  animerVers(positionCamera(a, CENTRE, distanceEnsemble()), CENTRE);
-}
-
-// Agrandit la partie du corps choisie pour que les muscles se distinguent.
-function cadrerZone(z) {
-  const haut = z.moitie === 'haut';
-  const hauteur = haut ? 0.74 : 1.0;
-  const largeur = haut ? 0.84 : 0.56;
-  const d = Math.max(hauteur / (2 * TAN_DEMI_FOV), largeur / (2 * TAN_DEMI_FOV * camera.aspect));
-  const cible = new THREE.Vector3(0, haut ? 1.27 : 0.52, 0);
-  animerVers(positionCamera(z.vue === 'face' ? 0 : Math.PI, cible, d), cible);
-}
-
-// Rapproche la caméra d'un muscle, en le tournant vers l'écran.
-function focaliser(mesh) {
-  const cible = new THREE.Vector3();
-  mesh.getWorldPosition(cible);
-  const normale = mesh.userData.normalLocale.clone()
-    .applyQuaternion(mesh.parent.getWorldQuaternion(new THREE.Quaternion()));
-  normale.y = 0;
-  if (normale.lengthSq() < 1e-4) normale.set(0, 0, 1);
-  normale.normalize();
-  const position = cible.clone().addScaledVector(normale, 1.05);
-  position.y += 0.12;
-  animerVers(position, cible);
-}
-
-function redimensionner() {
-  const w = zoneScene.clientWidth, h = zoneScene.clientHeight;
-  if (w === 0 || h === 0) return;
-  renderer.setSize(w, h, false);
-  camera.aspect = w / h;
-  camera.updateProjectionMatrix();
-}
-new ResizeObserver(redimensionner).observe(zoneScene);
-redimensionner();
-
-// L'affichage se réorganise quand le bas de l'écran apparaît : on attend un instant.
-function apresMiseEnPage(fn) {
-  requestAnimationFrame(() => requestAnimationFrame(() => { redimensionner(); fn(); }));
-}
-
-// Couleurs des muscles : neutre, ou dégradé selon l'intensité de la douleur.
-const couleurFaible = new THREE.Color(0xffb3a8);
-const couleurForte = new THREE.Color(0xff2d1f);
-
-function rafraichirCouleurs() {
-  for (const mesh of meshMuscles) {
-    const id = mesh.userData.muscle.id;
-    const zone = etat.zones.get(id);
-    const mat = mesh.material;
-    let intensite = zone ? zone.intensite : null;
-    if (etat.actif && etat.actif.id === id && etat.brouillon && etat.brouillon.intensite !== null) {
-      intensite = etat.brouillon.intensite;
-    }
-    if (intensite !== null) {
-      mat.color.copy(couleurFaible).lerp(couleurForte, intensite);
-      mat.emissive.copy(mat.color).multiplyScalar(0.35);
-    } else {
-      mat.color.copy(mesh.userData.couleur);
-      mat.emissive.setRGB(0, 0, 0);
-    }
-    if (etat.actif && etat.actif.id === id) mat.emissive.setRGB(0.55, 0.55, 0.55);
-  }
-}
-
-// Les muscles n'apparaissent qu'une fois la partie du corps choisie.
-function majVisibilite() {
-  const enDetail = etat.etape !== 'zone' && etat.zone;
-  for (const mesh of meshMuscles) {
-    const m = mesh.userData.muscle;
-    const dansZone = enDetail && m.vue === etat.zone.vue && mesh.userData.moitie === etat.zone.moitie;
-    mesh.visible = Boolean(etat.zones.has(m.id) || dansZone || (etat.actif && etat.actif.id === m.id));
-  }
-}
-
-function boucle(maintenant) {
-  requestAnimationFrame(boucle);
-  if (anim) {
-    const k = Math.min(1, (maintenant - anim.t0) / anim.duree);
+function allerAu(cible, duree = 550) {
+  const depart = { ...cadre };
+  const t0 = performance.now();
+  animation = { t0 };
+  const pas = (maintenant) => {
+    if (!animation || animation.t0 !== t0) return;
+    const k = Math.min(1, (maintenant - t0) / duree);
     const e = 1 - Math.pow(1 - k, 3);
-    camera.position.lerpVectors(anim.p0, anim.p1, e);
-    controles.target.lerpVectors(anim.c0, anim.c1, e);
-    if (k >= 1) anim = null;
-  }
-  controles.update();
-
-  for (const mesh of meshMuscles) {
-    if (!mesh.visible) continue;
-    const actif = etat.actif && etat.actif.id === mesh.userData.muscle.id;
-    const f = actif ? 1.06 + 0.04 * Math.sin(maintenant / 220) : 1;
-    mesh.scale.copy(mesh.userData.echelle).multiplyScalar(f);
-  }
-  renderer.render(scene, camera);
+    cadre = {
+      cx: depart.cx + (cible.cx - depart.cx) * e,
+      cy: depart.cy + (cible.cy - depart.cy) * e,
+      s: depart.s + (cible.s - depart.s) * e,
+    };
+    appliquerCadre(cadre);
+    if (k < 1) requestAnimationFrame(pas);
+    else animation = null;
+  };
+  requestAnimationFrame(pas);
 }
-requestAnimationFrame(boucle);
+
+new ResizeObserver(() => appliquerCadre(cadre)).observe(zoneScene);
+appliquerCadre(cadre);
+
+function apresMiseEnPage(fn) {
+  requestAnimationFrame(() => requestAnimationFrame(() => { appliquerCadre(cadre); fn(); }));
+}
+
+function cadrerCorps() { allerAu({ cx: 0.5, cy: 0.5, s: 1 }); }
+
+function cadrerZone(z) {
+  const cy = z.moitie === 'haut' ? 0.25 : 0.70;
+  allerAu(borner(0.5, cy, 1.55));
+}
+
+function cadrerMuscle(m) {
+  allerAu(borner(m.centre[0], m.centre[1], 2.5));
+}
+
+function changerVue(vue) {
+  etat.vue = vue;
+  image.setAttribute('href', `img/anatomie-${vue}.png`);
+  document.querySelectorAll('#vues button').forEach(b => b.classList.toggle('actif', b.dataset.vue === vue));
+  dessiner();
+}
+
+// --- Contours ---------------------------------------------------------------
+
+function polygones(id) {
+  const brut = (MASQUES[id] || []).filter(p => p.length > 4);
+  const polys = brut.map(plat => {
+    const pts = [];
+    for (let i = 0; i < plat.length; i += 2) pts.push([plat[i], plat[i + 1]]);
+    return pts;
+  });
+  const aire = (poly) => {
+    const xs = poly.map(p => p[0]), ys = poly.map(p => p[1]);
+    return (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
+  };
+  const aireMax = Math.max(0, ...polys.map(aire));
+  // Les fragments minuscules (parasites de découpage) sont écartés.
+  return polys.filter(p => aire(p) >= 0.22 * aireMax);
+}
+
+const polygonesCache = new Map();
+function polygonesDe(id) {
+  if (!polygonesCache.has(id)) polygonesCache.set(id, polygones(id));
+  return polygonesCache.get(id);
+}
+
+function pointDans(poly, x, y) {
+  let dedans = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) dedans = !dedans;
+  }
+  return dedans;
+}
+
+const contient = (m, x, y) => polygonesDe(m.id).some(p => pointDans(p, x, y));
+
+function formes(m) {
+  const polys = polygonesDe(m.id);
+  if (polys.length) {
+    return polys.map(p => {
+      const e = document.createElementNS(NS, 'path');
+      e.setAttribute('d', 'M' + p.map(([x, y]) => `${(x * LARGEUR).toFixed(1)},${(y * HAUTEUR).toFixed(1)}`).join('L') + 'Z');
+      return e;
+    });
+  }
+  const [w, h] = ELLIPSES[m.region] || [0.08, 0.1];
+  const e = document.createElementNS(NS, 'ellipse');
+  e.setAttribute('cx', m.centre[0] * LARGEUR);
+  e.setAttribute('cy', m.centre[1] * HAUTEUR);
+  e.setAttribute('rx', (w / 2) * LARGEUR);
+  e.setAttribute('ry', (h / 2) * HAUTEUR);
+  return [e];
+}
+
+function peindre(m, remplissage, contour, epaisseur, classe) {
+  for (const f of formes(m)) {
+    f.setAttribute('fill', remplissage);
+    f.setAttribute('stroke', contour);
+    f.setAttribute('stroke-width', epaisseur);
+    f.setAttribute('stroke-linejoin', 'round');
+    if (classe) f.setAttribute('class', classe);
+    couche.append(f);
+  }
+}
+
+const CORAIL = '255,107,94';
+
+function dessiner() {
+  couche.replaceChildren();
+
+  // Parcours guidé : les muscles de la zone se dessinent en contour, pour les distinguer.
+  let zone = null, force = 1;
+  if (etat.etape === 'muscle') zone = etat.zone;
+  else if ((etat.etape === 'phrase' || etat.etape === 'intensite') && etat.actif) {
+    zone = { vue: etat.actif.vue, moitie: moitieDe(etat.actif) };
+    force = 0.5;
+  }
+  if (zone && zone.vue === etat.vue) {
+    for (const m of musclesDe(etat.vue)) {
+      if (moitieDe(m) !== zone.moitie || (etat.actif && m.id === etat.actif.id)) continue;
+      peindre(m, `rgba(${CORAIL},${0.10 * force})`, `rgba(${CORAIL},${0.6 * force})`, 1);
+    }
+  }
+
+  // Les zones déjà renseignées, plus intenses quand la douleur l'est.
+  for (const m of musclesDe(etat.vue)) {
+    const z = etat.zones.get(m.id);
+    if (!z || (etat.actif && m.id === etat.actif.id)) continue;
+    peindre(m, `rgba(${CORAIL},${0.28 + 0.34 * z.intensite})`, `rgba(${CORAIL},0.7)`, 1);
+  }
+
+  // Le muscle en cours de saisie.
+  if (etat.actif && etat.actif.vue === etat.vue) {
+    peindre(etat.actif, `rgba(${CORAIL},0.82)`, 'rgba(255,255,255,0.55)', 1.6, 'actif');
+  }
+}
 
 // ---------------------------------------------------------------------------
-// Toucher le corps
+// Toucher la planche
 // ---------------------------------------------------------------------------
 
-const rayon = new THREE.Raycaster();
-const pointeurs = new Set();
 let debut = null;
-
-toile.addEventListener('pointerdown', (e) => {
-  pointeurs.add(e.pointerId);
-  debut = pointeurs.size === 1 ? { x: e.clientX, y: e.clientY, t: performance.now() } : null;
-});
-toile.addEventListener('pointerup', (e) => {
-  pointeurs.delete(e.pointerId);
+svg.addEventListener('pointerdown', (e) => { debut = { x: e.clientX, y: e.clientY, t: performance.now() }; });
+svg.addEventListener('pointerup', (e) => {
   if (!debut) return;
   const d = Math.hypot(e.clientX - debut.x, e.clientY - debut.y);
   const duree = performance.now() - debut.t;
   debut = null;
-  if (d < 9 && duree < 600) toucher(e.clientX, e.clientY);
+  if (d < 10 && duree < 700) toucher(e.clientX, e.clientY);
 });
-toile.addEventListener('pointercancel', (e) => { pointeurs.delete(e.pointerId); debut = null; });
+svg.addEventListener('pointercancel', () => { debut = null; });
 
-function pointeRayon(cx, cy) {
-  const r = toile.getBoundingClientRect();
-  const ndc = new THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
-  rayon.setFromCamera(ndc, camera);
-  return r;
+function pointNormalise(cx, cy) {
+  const p = new DOMPoint(cx, cy).matrixTransform(svg.getScreenCTM().inverse());
+  return [p.x / LARGEUR, p.y / HAUTEUR];
 }
 
-// Le muscle visible le plus proche du doigt, avec une tolérance d'un doigt.
-function muscleProche(cx, cy, candidats, tolerance = 34) {
-  const r = toile.getBoundingClientRect();
-  const x = cx - r.left, y = cy - r.top;
-  let meilleur = null, distMin = tolerance;
-  const pos = new THREE.Vector3(), normale = new THREE.Vector3(), q = new THREE.Quaternion();
-  for (const mesh of candidats) {
-    mesh.getWorldPosition(pos);
-    normale.copy(mesh.userData.normalLocale).applyQuaternion(mesh.parent.getWorldQuaternion(q));
-    if (normale.dot(camera.position.clone().sub(pos).normalize()) < 0.25) continue;
-    const p = pos.clone().project(camera);
-    const dist = Math.hypot((p.x + 1) / 2 * r.width - x, (1 - p.y) / 2 * r.height - y);
-    if (dist < distMin) { distMin = dist; meilleur = mesh.userData.muscle; }
+function muscleProche(nx, ny, candidats) {
+  const echelle = svg.getScreenCTM().a;   // pixels écran par unité de l'image
+  let meilleur = null, distMin = TOLERANCE_DOIGT;
+  for (const m of candidats) {
+    const dist = Math.hypot((nx - m.centre[0]) * LARGEUR, (ny - m.centre[1]) * HAUTEUR) * echelle;
+    if (dist < distMin) { distMin = dist; meilleur = m; }
   }
   return meilleur;
 }
 
 function toucher(cx, cy) {
-  pointeRayon(cx, cy);
+  const [nx, ny] = pointNormalise(cx, cy);
 
   if (etat.etape === 'zone') {
     // Une zone déjà renseignée se rouvre en la touchant.
-    const deja = meshMuscles.filter(m => m.visible);
-    const touchesM = rayon.intersectObjects(deja, false);
-    if (touchesM[0]) { modifierZone(touchesM[0].object.userData.muscle.id); return; }
-    // Sinon, on regarde où le doigt a touché le corps : haut ou bas, face ou dos.
-    const touchesC = rayon.intersectObjects(parties, false);
-    if (!touchesC[0]) return;
-    choisirZone({
-      vue: vueCourante(),
-      moitie: touchesC[0].point.y >= SEUIL_HAUT_BAS ? 'haut' : 'bas',
-    });
+    const deja = musclesDe(etat.vue).find(m => etat.zones.has(m.id) && contient(m, nx, ny));
+    if (deja) { modifierZone(deja.id); return; }
+    // Sinon, le doigt désigne une partie du corps : haut ou bas, face ou dos.
+    if (nx < 0.06 || nx > 0.94 || ny < 0.01 || ny > 0.99) return;
+    choisirZone({ vue: etat.vue, moitie: ny < SEUIL_HAUT_BAS ? 'haut' : 'bas' });
     return;
   }
 
   if (etat.etape === 'muscle') {
-    const candidats = meshMuscles.filter(m => m.visible);
-    const directs = rayon.intersectObjects(candidats, false);
-    const muscle = directs[0] ? directs[0].object.userData.muscle : muscleProche(cx, cy, candidats);
-    if (muscle) choisirMuscle(muscle);
+    const candidats = musclesDe(etat.zone.vue).filter(m => moitieDe(m) === etat.zone.moitie);
+    const direct = candidats.find(m => contient(m, nx, ny)) || muscleProche(nx, ny, candidats);
+    if (direct) choisirMuscle(direct);
   }
 }
 
@@ -338,21 +316,20 @@ function allerEtape(nom) {
     dire(etat.zones.size === 0
       ? 'Touche la partie de ton corps qui te fait mal.'
       : 'Tu peux ajouter une autre zone, ou envoyer ton bilan.',
-      etat.zones.size === 0 ? 'Tu peux le tourner du doigt, ou choisir Face ou Dos.' : null);
+      etat.zones.size === 0 ? 'Choisis Face ou Dos, puis touche le haut ou le bas du corps.' : null);
     afficherZonesDeja();
-    majVisibilite();
-    rafraichirCouleurs();
-    apresMiseEnPage(() => vueDensemble());
+    dessiner();
+    apresMiseEnPage(cadrerCorps);
     return;
   }
 
   if (nom === 'muscle') {
     etat.actif = null;
     etat.brouillon = null;
+    changerVue(etat.zone.vue);
     dire('Peux-tu être plus précis ? Touche le muscle qui te fait mal.',
       'Si tu te trompes, la flèche en haut te ramène en arrière.');
-    majVisibilite();
-    rafraichirCouleurs();
+    dessiner();
     apresMiseEnPage(() => cadrerZone(etat.zone));
     return;
   }
@@ -365,10 +342,9 @@ function allerEtape(nom) {
     afficherIntensite();
   }
   dock.hidden = false;
-  majVisibilite();
-  rafraichirCouleurs();
-  const mesh = meshMuscles.find(x => x.userData.muscle.id === etat.actif.id);
-  apresMiseEnPage(() => { if (mesh) focaliser(mesh); });
+  changerVue(etat.actif.vue);
+  dessiner();
+  apresMiseEnPage(() => cadrerMuscle(etat.actif));
 }
 
 function retour() {
@@ -392,9 +368,8 @@ function choisirMuscle(m) {
 }
 
 function modifierZone(id) {
-  const zone = etat.zones.get(id);
-  const m = MUSCLES.find(x => x.id === id);
-  etat.zone = { vue: zone.vue, moitie: zone.moitie };
+  const m = parId[id];
+  etat.zone = { vue: m.vue, moitie: moitieDe(m) };
   choisirMuscle(m);
 }
 
@@ -406,7 +381,7 @@ function afficherZonesDeja() {
   dock.append(elt('p', 'titre-petit', 'Tes zones (touche-en une pour la modifier)'));
   const liste = elt('div', 'zones');
   for (const [id, z] of etat.zones) {
-    const m = MUSCLES.find(x => x.id === id);
+    const m = parId[id];
     const b = elt('button', 'zone', m.nomAffiche);
     b.type = 'button';
     b.append(elt('b', '', `${Math.round(z.intensite * 100)} %`));
@@ -499,8 +474,7 @@ function afficherIntensite() {
   const envoyer = boutonEnvoyer();
   const ajouter = elt('button', 'lien', 'Ajouter une autre zone');
   ajouter.type = 'button';
-  const peutAjouter = etat.zones.size + (etat.zones.has(m.id) ? 0 : 1) < ZONES_MAX;
-  ajouter.hidden = !peutAjouter;
+  ajouter.hidden = !(etat.zones.size + (etat.zones.has(m.id) ? 0 : 1) < ZONES_MAX);
 
   const debloquer = () => {
     touche = true;
@@ -511,7 +485,6 @@ function afficherIntensite() {
     mot.textContent = motIntensite(Number(curseur.value));
     envoyer.disabled = false;
     ajouter.disabled = false;
-    rafraichirCouleurs();
   };
   curseur.addEventListener('input', debloquer);
   curseur.addEventListener('change', debloquer);
@@ -528,15 +501,12 @@ function enregistrer() {
     sensation: etat.brouillon.sensation,
     intensite: etat.brouillon.intensite,
     phrase: etat.brouillon.phrase,
-    vue: etat.zone.vue,
-    moitie: etat.zone.moitie,
   });
 }
 
 function boutonEnvoyer() {
   const b = elt('button', 'bouton', 'Envoyer à mon kiné');
   b.type = 'button';
-  b.style.width = '100%';
   return b;
 }
 
@@ -553,7 +523,7 @@ if (prenom) $('#titre-intro').textContent = `Bonjour ${prenom}, avant ton premie
 
 $('#bt-commencer').addEventListener('click', () => { montrer('corps'); allerEtape('zone'); });
 $('#bt-retour').addEventListener('click', retour);
-document.querySelectorAll('#vues button').forEach(b => b.addEventListener('click', () => vueDensemble(b.dataset.vue)));
+document.querySelectorAll('#vues button').forEach(b => b.addEventListener('click', () => changerVue(b.dataset.vue)));
 
 // Le clavier du téléphone réduit l'espace visible : on suit la zone réellement visible.
 if (window.visualViewport) {
@@ -583,7 +553,7 @@ function construireBilan() {
     prenom: prenom || null,
     plaintes: [...etat.zones.entries()].map(([muscle, z]) => ({
       muscle,
-      partie: `${z.vue}-${z.moitie}`,
+      partie: `${parId[muscle].vue}-${moitieDe(parId[muscle])}`,
       sensation: z.sensation,
       intensite: Math.round(z.intensite * 100) / 100,
       phrase: z.phrase,
@@ -606,7 +576,7 @@ function envoyerBilan(bouton) {
   }, 900);
 }
 
-// Démarrage : l'accueil, le corps est déjà prêt derrière.
+// Démarrage : l'accueil, la planche est déjà prête derrière.
 montrer('intro');
 bulle.hidden = true;
 dock.hidden = true;
