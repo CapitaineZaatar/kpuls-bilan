@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#17324D">
+<title>KPULS, ton bilan avant le rendez-vous</title>
+<style>
+  :root {
+    --nuit: #17324D;
+    --petrole: #087E8B;
+    --corail: #FF6B5E;
+    --corail-clair: #FFA69E;
+    --blanc: #FFFFFF;
+    --carte: rgba(255, 255, 255, 0.08);
+    --trait: rgba(255, 255, 255, 0.14);
+    --texte-doux: rgba(255, 255, 255, 0.68);
+    --police: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none;
+    background: var(--nuit); color: var(--blanc); font-family: var(--police);
+  }
+  button { font: inherit; color: inherit; }
+  [hidden] { display: none !important; }
+
+  #app {
+    position: fixed; inset: 0;
+    display: grid; grid-template-rows: auto minmax(0, 1fr) auto;
+    padding-top: env(safe-area-inset-top);
+    background: radial-gradient(120% 80% at 50% 30%, #23507a 0%, var(--nuit) 62%);
+  }
+
+  /* En-tête */
+  #entete { padding: 14px 20px 6px; }
+  #entete h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+  #entete p { margin: 4px 0 0; font-size: 14px; color: var(--texte-doux); line-height: 1.35; }
+
+  /* Scène 3D */
+  #scene { position: relative; min-height: 0; touch-action: none; }
+  #scene canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
+  #vues {
+    position: absolute; top: 8px; right: 14px; display: flex; gap: 4px; padding: 3px;
+    background: rgba(23, 50, 77, 0.72); border: 1px solid var(--trait); border-radius: 999px;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  }
+  #vues button {
+    border: 0; background: transparent; padding: 8px 16px; border-radius: 999px;
+    font-size: 14px; font-weight: 600; color: var(--texte-doux); cursor: pointer;
+  }
+  #vues button.actif { background: var(--corail); color: var(--blanc); }
+  #astuce {
+    position: absolute; left: 0; right: 0; bottom: 8px; text-align: center;
+    font-size: 12px; color: var(--texte-doux); pointer-events: none; transition: opacity .4s;
+  }
+
+  /* Bas de l'écran */
+  #dock {
+    background: rgba(12, 32, 52, 0.94); border-top: 1px solid var(--trait);
+    border-radius: 22px 22px 0 0; padding: 16px 20px calc(18px + env(safe-area-inset-bottom));
+    max-height: 62dvh; overflow-y: auto;
+  }
+  .titre-petit { font-size: 12px; font-weight: 700; color: var(--texte-doux); margin: 0 0 8px; }
+  .zones { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .zone {
+    border: 1px solid var(--trait); background: var(--carte); border-radius: 14px;
+    padding: 9px 12px; font-size: 14px; text-align: left; cursor: pointer;
+  }
+  .zone b { color: var(--corail-clair); font-variant-numeric: tabular-nums; margin-left: 6px; }
+  .vide { margin: 0 0 14px; font-size: 14px; color: var(--texte-doux); }
+
+  h2 { margin: 0; font-size: 20px; font-weight: 700; }
+  .region { margin: 2px 0 14px; font-size: 13px; color: var(--texte-doux); }
+  .grille { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+  .choix {
+    border: 1px solid var(--trait); background: var(--carte); border-radius: 14px;
+    padding: 12px 10px; font-size: 15px; font-weight: 600; text-align: center; cursor: pointer;
+  }
+  .choix.actif { background: var(--corail); border-color: var(--corail); }
+  .ligne-intensite { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
+  .ligne-intensite output { font-size: 20px; font-weight: 700; color: var(--corail); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--corail); height: 32px; margin: 0 0 16px; }
+  .echelle { display: flex; justify-content: space-between; margin: -10px 0 16px; font-size: 12px; color: var(--texte-doux); }
+
+  .boutons { display: flex; gap: 10px; }
+  .bouton {
+    flex: 1; border: 0; border-radius: 16px; padding: 15px 18px; font-size: 17px; font-weight: 700;
+    background: var(--corail); color: var(--blanc); cursor: pointer;
+  }
+  .bouton.contour { background: transparent; border: 1.5px solid var(--corail); color: var(--corail-clair); }
+  .bouton:disabled { opacity: 0.4; cursor: default; }
+
+  /* Écrans pleine page */
+  .plein {
+    position: fixed; inset: 0; z-index: 10; overflow-y: auto;
+    padding: calc(28px + env(safe-area-inset-top)) 24px calc(24px + env(safe-area-inset-bottom));
+    background: radial-gradient(120% 80% at 50% 25%, #23507a 0%, var(--nuit) 62%);
+    display: flex; flex-direction: column;
+  }
+  .plein .contenu { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 18px; max-width: 520px; width: 100%; margin: 0 auto; }
+  .plein.haut .contenu { justify-content: flex-start; }
+  .plein h1 { margin: 0; font-size: 26px; line-height: 1.2; letter-spacing: -0.01em; }
+  .plein p { margin: 0; font-size: 16px; line-height: 1.45; color: var(--texte-doux); }
+  .pied { max-width: 520px; width: 100%; margin: 20px auto 0; }
+  .pied .bouton { width: 100%; }
+  .pied.boutons { display: flex; gap: 10px; }
+  .pied.boutons .bouton { width: auto; }
+  .pied.boutons .bouton.contour { flex: 0 0 auto; }
+  .pastille {
+    width: 92px; height: 92px; border-radius: 50%; background: rgba(255, 107, 94, 0.14);
+    display: grid; place-items: center; margin: 0 auto 6px;
+  }
+  .pastille svg { width: 46px; height: 46px; stroke: var(--corail); fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+  .centre { text-align: center; align-items: stretch; }
+  .marque { font-size: 13px; font-weight: 700; letter-spacing: 0.14em; color: var(--corail-clair); }
+
+  textarea {
+    width: 100%; min-height: 84px; resize: none; border: 1px solid var(--trait); background: var(--carte);
+    border-radius: 14px; padding: 12px; font: inherit; font-size: 16px; color: var(--blanc);
+  }
+  textarea::placeholder { color: rgba(255, 255, 255, 0.4); }
+  .bloc { display: flex; flex-direction: column; gap: 8px; }
+  .liste-choix { display: flex; flex-wrap: wrap; gap: 8px; }
+  .liste-choix .choix { text-align: left; }
+  pre#debug {
+    margin: 0; padding: 12px; border-radius: 12px; background: rgba(0, 0, 0, 0.35);
+    font-size: 11px; line-height: 1.4; white-space: pre-wrap; word-break: break-all; color: var(--texte-doux);
+  }
+  a.bouton { display: block; text-align: center; text-decoration: none; }
+</style>
+<script type="importmap">
+  { "imports": { "three": "./vendor/three.module.js" } }
+</script>
+</head>
+<body>
+
+<div id="app">
+  <header id="entete">
+    <h1>Où as-tu mal ?</h1>
+    <p>Touche un muscle. Fais tourner le corps avec ton doigt.</p>
+  </header>
+
+  <main id="scene">
+    <canvas id="toile" aria-label="Corps en 3D"></canvas>
+    <div id="vues" role="group" aria-label="Vue du corps">
+      <button type="button" data-vue="face" class="actif">Face</button>
+      <button type="button" data-vue="dos">Dos</button>
+    </div>
+    <div id="astuce">Pince avec deux doigts pour zoomer</div>
+  </main>
+
+  <section id="dock"></section>
+</div>
+
+<!-- Accueil -->
+<section id="ecran-intro" class="plein centre">
+  <div class="contenu">
+    <div class="pastille" aria-hidden="true">
+      <svg viewBox="0 0 48 48"><circle cx="24" cy="10" r="5"/><path d="M24 17v14M14 22h20M24 31l-7 12M24 31l7 12"/></svg>
+    </div>
+    <div class="marque">KPULS</div>
+    <h1 id="titre-intro">Avant ton premier rendez-vous</h1>
+    <p>Montre à ton kiné où ça coince. Ça prend deux minutes, et il aura ton bilan avant de te recevoir.</p>
+  </div>
+  <div class="pied"><button id="bt-commencer" class="bouton" type="button">Commencer</button></div>
+</section>
+
+<!-- Origine de la douleur -->
+<section id="ecran-origine" class="plein haut" hidden>
+  <div class="contenu">
+    <h1>D'où ça vient ?</h1>
+    <div class="bloc">
+      <p class="titre-petit" style="margin:0">Qu'est-ce qui a déclenché ça ?</p>
+      <div class="liste-choix" id="liste-origine"></div>
+    </div>
+    <div class="bloc">
+      <p class="titre-petit" style="margin:0">Depuis quand ?</p>
+      <div class="liste-choix" id="liste-depuis"></div>
+    </div>
+    <div class="bloc">
+      <p class="titre-petit" style="margin:0">Une précision ? (facultatif)</p>
+      <textarea id="note" placeholder="Ex. depuis une chute, ça empire le matin…"></textarea>
+    </div>
+  </div>
+  <div class="pied boutons">
+    <button id="bt-retour-corps" class="bouton contour" type="button">Retour</button>
+    <button id="bt-envoyer" class="bouton" type="button" disabled>Envoyer à mon kiné</button>
+  </div>
+</section>
+
+<!-- Confirmation -->
+<section id="ecran-envoye" class="plein centre" hidden>
+  <div class="contenu">
+    <div class="pastille" aria-hidden="true">
+      <svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="18"/><path d="M15 25l6 6 12-13"/></svg>
+    </div>
+    <h1>Bilan envoyé</h1>
+    <p>Ton kiné le verra avant ton rendez-vous.</p>
+    <pre id="debug" hidden></pre>
+  </div>
+  <div class="pied"><a id="lien-retour" class="bouton" href="#">Retourner dans KPULS</a></div>
+</section>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>
