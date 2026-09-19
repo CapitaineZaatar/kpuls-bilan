@@ -248,6 +248,20 @@ function pointNormalise(cx, cy) {
   return [p.x / LARGEUR, p.y / HAUTEUR];
 }
 
+// Parmi les muscles dont le contour contient le doigt, le plus proche du doigt
+// par son centre. Les contours se chevauchent (près d'un point sur cinq), et
+// prendre simplement le premier de la liste donnerait souvent le mauvais côté
+// ou le mauvais muscle voisin.
+function muscleSousLeDoigt(nx, ny, candidats) {
+  const touches = candidats.filter(m => contient(m, nx, ny));
+  if (!touches.length) return null;
+  return touches.reduce((a, b) => (distanceCentre(nx, ny, a) <= distanceCentre(nx, ny, b) ? a : b));
+}
+
+function distanceCentre(nx, ny, m) {
+  return Math.hypot((nx - m.centre[0]) * LARGEUR, (ny - m.centre[1]) * HAUTEUR);
+}
+
 function muscleProche(nx, ny, candidats) {
   const echelle = svg.getScreenCTM().a;   // pixels écran par unité de l'image
   let meilleur = null, distMin = TOLERANCE_DOIGT;
@@ -263,7 +277,7 @@ function toucher(cx, cy) {
 
   if (etat.etape === 'zone') {
     // Une zone déjà renseignée se rouvre en la touchant.
-    const deja = musclesDe(etat.vue).find(m => etat.zones.has(m.id) && contient(m, nx, ny));
+    const deja = muscleSousLeDoigt(nx, ny, musclesDe(etat.vue).filter(m => etat.zones.has(m.id)));
     if (deja) { modifierZone(deja.id); return; }
     // Sinon, le doigt désigne une partie du corps : haut ou bas, face ou dos.
     if (nx < 0.06 || nx > 0.94 || ny < 0.01 || ny > 0.99) return;
@@ -273,7 +287,7 @@ function toucher(cx, cy) {
 
   if (etat.etape === 'muscle') {
     const candidats = musclesDe(etat.zone.vue).filter(m => moitieDe(m) === etat.zone.moitie);
-    const direct = candidats.find(m => contient(m, nx, ny)) || muscleProche(nx, ny, candidats);
+    const direct = muscleSousLeDoigt(nx, ny, candidats) || muscleProche(nx, ny, candidats);
     if (direct) choisirMuscle(direct);
   }
 }
