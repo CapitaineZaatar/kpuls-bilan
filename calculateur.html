@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#17324D">
+<title>KPULS, ce que ça change pour ton cabinet</title>
+<style>
+  :root {
+    --nuit: #17324D; --corail: #FF6B5E; --corail-clair: #FFA69E; --blanc: #FFFFFF;
+    --carte: rgba(255, 255, 255, 0.08); --trait: rgba(255, 255, 255, 0.14);
+    --texte-doux: rgba(255, 255, 255, 0.68);
+    --police: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html { background: var(--nuit); }
+  body {
+    margin: 0; min-height: 100vh; color: var(--blanc); font-family: var(--police);
+    background: radial-gradient(120% 60% at 50% 0%, #23507a 0%, var(--nuit) 62%) no-repeat, var(--nuit);
+    padding: max(20px, env(safe-area-inset-top)) 16px max(32px, env(safe-area-inset-bottom));
+  }
+  main { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 28px; letter-spacing: -0.02em; margin: 8px 0 6px; }
+  .intro { color: var(--texte-doux); font-size: 16px; line-height: 1.45; margin: 0 0 22px; max-width: 640px; }
+  .grille { display: grid; gap: 16px; grid-template-columns: 1fr; }
+  @media (min-width: 820px) { .grille { grid-template-columns: 1fr 1.15fr; align-items: start; } }
+  .carte { background: var(--carte); border: 1px solid var(--trait); border-radius: 20px; padding: 18px; }
+  .carte h2 { margin: 0 0 4px; font-size: 18px; }
+  .carte .sous { margin: 0 0 14px; color: var(--texte-doux); font-size: 14px; line-height: 1.4; }
+  .etiquette { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--corail-clair); margin: 0 0 10px; }
+
+  label.champ { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--trait); font-size: 15px; }
+  label.champ:first-of-type { border-top: 0; }
+  label.champ span.nom { flex: 1; line-height: 1.3; }
+  label.champ small { display: block; color: var(--texte-doux); font-size: 12.5px; margin-top: 2px; }
+  .saisie { display: flex; align-items: center; gap: 6px; flex: none; }
+  .saisie input {
+    width: 84px; padding: 9px 10px; border-radius: 12px; border: 1px solid var(--trait);
+    background: rgba(255,255,255,.1); color: var(--blanc); font: inherit; font-size: 16px; font-weight: 700; text-align: right;
+  }
+  .saisie input:focus { outline: 2px solid var(--corail); outline-offset: 1px; }
+  .saisie .unite { color: var(--texte-doux); font-size: 13px; min-width: 44px; }
+  .derive { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: rgba(255,255,255,.06); color: var(--texte-doux); font-size: 14px; }
+  .derive b { color: var(--blanc); }
+
+  .chiffres { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .chiffre { background: rgba(255,255,255,.07); border-radius: 16px; padding: 14px; }
+  .chiffre .valeur { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
+  .chiffre .legende { margin-top: 5px; font-size: 13px; color: var(--texte-doux); line-height: 1.3; }
+  .chiffre.fort { grid-column: 1 / -1; background: var(--corail); }
+  .chiffre.fort .legende { color: rgba(255,255,255,.9); }
+  .chiffre.fort .valeur { font-size: 34px; }
+  .chiffre.neutre .valeur { color: var(--corail-clair); }
+  .reinvest { margin: 14px 0 4px; }
+  .reinvest header { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; margin-bottom: 6px; }
+  .reinvest header b { white-space: nowrap; }
+  .reinvest input[type=range] { width: 100%; accent-color: var(--corail); }
+  .reinvest p { margin: 6px 0 0; font-size: 12.5px; color: var(--texte-doux); line-height: 1.4; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 6px; border-top: 1px solid var(--trait); vertical-align: top; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--texte-doux); border-top: 0; }
+  td.num, th.num { text-align: right; white-space: nowrap; }
+  td small { display: block; color: var(--texte-doux); font-size: 12.5px; margin-top: 2px; }
+  .mention { margin: 18px 4px 0; font-size: 13px; color: var(--texte-doux); line-height: 1.45; }
+  .prix-vide { color: var(--corail-clair); }
+  #erreur { display: none; margin-bottom: 16px; padding: 14px; border-radius: 14px; background: rgba(255,107,94,.18); border: 1px solid var(--corail); }
+</style>
+</head>
+<body>
+<main>
+  <p class="etiquette">KPULS</p>
+  <h1>Ce que KPULS change pour ton cabinet</h1>
+  <p class="intro">Entre tes chiffres. À droite, tu vois le temps que KPULS te fait gagner et ce que ça peut représenter pour ton chiffre d'affaires.</p>
+  <div id="erreur">Les hypothèses n'ont pas pu être chargées. Vérifie la connexion et recharge la page.</div>
+
+  <div class="grille">
+    <section class="carte" aria-labelledby="t-situation">
+      <h2 id="t-situation">Ton cabinet aujourd'hui</h2>
+      <p class="sous">Des chiffres moyens suffisent.</p>
+      <div id="champs"></div>
+      <div class="derive" id="derive"></div>
+    </section>
+
+    <section class="carte" aria-labelledby="t-kpuls">
+      <h2 id="t-kpuls">Avec KPULS</h2>
+      <p class="sous" id="sous-kpuls"></p>
+      <div class="chiffres" id="chiffres"></div>
+      <div class="reinvest">
+        <header><span>Part du temps libéré réinvestie en séances</span><b id="reinvest-val"></b></header>
+        <input type="range" id="reinvest" min="0" max="100" step="5">
+        <p>Le temps libéré ne rapporte que s'il est rempli par des patients en plus. À toi de régler la part réaliste pour ton cabinet.</p>
+      </div>
+    </section>
+  </div>
+
+  <section class="carte" style="margin-top:16px" aria-labelledby="t-calcul">
+    <h2 id="t-calcul">Comment on calcule</h2>
+    <p class="sous" id="maj"></p>
+    <table>
+      <thead><tr><th>Poste</th><th class="num">Gain</th><th class="num">Par semaine</th></tr></thead>
+      <tbody id="postes"></tbody>
+    </table>
+  </section>
+  <p class="mention" id="mention"></p>
+</main>
+
+<script src="calcul.js"></script>
+<script>
+const CLE = "kpuls.calculateur.saisie";
+const CHAMPS = [
+  { id: "patientsParJour",     nom: "Patients par jour",                unite: "patients" },
+  { id: "joursParSemaine",     nom: "Jours travaillés par semaine",     unite: "jours" },
+  { id: "nouveauxParSemaine",  nom: "Nouveaux patients par semaine",    unite: "patients", aide: "Ceux que tu vois pour la première fois." },
+  { id: "dureeSeanceMin",      nom: "Durée moyenne d'une séance",       unite: "min" },
+  { id: "tarifSeance",         nom: "Tarif moyen d'une séance",         unite: "€" }
+];
+let hyp = null, saisie = {};
+
+const $ = (id) => document.getElementById(id);
+const lire = () => { try { return JSON.parse(localStorage.getItem(CLE)) || {}; } catch (e) { return {}; } };
+const ecrire = () => { try { localStorage.setItem(CLE, JSON.stringify(saisie)); } catch (e) {} };
+
+function construireChamps() {
+  $("champs").innerHTML = CHAMPS.map((c) => `
+    <label class="champ">
+      <span class="nom">${c.nom}${c.aide ? `<small>${c.aide}</small>` : ""}</span>
+      <span class="saisie"><input id="in-${c.id}" type="number" inputmode="decimal" min="0" step="any" value="${saisie[c.id]}"><span class="unite">${c.unite}</span></span>
+    </label>`).join("");
+  CHAMPS.forEach((c) => $("in-" + c.id).addEventListener("input", (e) => {
+    saisie[c.id] = e.target.value === "" ? NaN : Number(e.target.value);
+    ecrire(); afficher();
+  }));
+  $("reinvest").addEventListener("input", (e) => {
+    saisie.reinvestissementPct = Number(e.target.value); ecrire(); afficher();
+  });
+}
+
+function chiffre(valeur, legende, classe = "") {
+  return `<div class="chiffre ${classe}"><div class="valeur">${valeur}</div><div class="legende">${legende}</div></div>`;
+}
+
+function afficher() {
+  const r = calculer(hyp, saisie);
+  $("derive").innerHTML = `Soit <b>${fmt.nombre(r.seancesSemaine)}</b> séances par semaine.`;
+  $("reinvest").value = saisie.reinvestissementPct;
+  $("reinvest-val").textContent = saisie.reinvestissementPct + " %";
+  $("sous-kpuls").textContent = `Sur ${hyp.semainesParAn} semaines travaillées par an.`;
+
+  let html = chiffre(fmt.heures(r.heuresSemaine), "de temps libéré chaque semaine", "neutre")
+           + chiffre(fmt.nombre(r.heuresAn) + " h", "de temps libéré par an", "neutre")
+           + chiffre(fmt.nombre(r.seancesSuppMois, 1), "séances en plus par mois, si tu réinvestis")
+           + chiffre(fmt.euros(r.caAn), "de chiffre d'affaires potentiel par an");
+  if (r.prix === null) {
+    html += chiffre('<span class="prix-vide">À définir</span>', "Le prix de l'abonnement sera affiché ici.");
+  } else {
+    html += chiffre(fmt.euros(r.coutAn), `d'abonnement par an (${fmt.euros(r.prix)} par mois)`);
+    html += chiffre(fmt.euros(r.gainNetAn), "de gain net par an, abonnement déduit", "fort");
+    if (r.seuilSeancesMois !== null)
+      html += chiffre(fmt.nombre(r.seuilSeancesMois, 1) + " séances", "de plus par mois suffisent à couvrir l'abonnement");
+  }
+  $("chiffres").innerHTML = html;
+
+  $("postes").innerHTML = r.postes.map((p) => `
+    <tr><td>${p.libelle}<small>${p.minutes} min pour ${BASES[p.base].libelle}${p.partPct < 100 ? `, dans ${p.partPct} % des cas` : ""}. ${p.note || ""}</small></td>
+        <td class="num">${p.minutes} min</td><td class="num">${fmt.heures(p.minutesSemaine / 60)}</td></tr>`).join("");
+}
+
+async function demarrer() {
+  try {
+    const rep = await fetch("hypotheses.json", { cache: "no-store" });
+    if (!rep.ok) throw new Error(rep.status);
+    hyp = await rep.json();
+  } catch (e) { $("erreur").style.display = "block"; return; }
+  saisie = { ...hyp.defauts, reinvestissementPct: hyp.reinvestissementPct, ...lire() };
+  const d = new Date(hyp.misAJour + "T12:00:00");
+  $("maj").textContent = "Hypothèses mises à jour le " + d.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" }) + ".";
+  $("mention").textContent = hyp.mention;
+  construireChamps(); afficher();
+}
+demarrer();
+</script>
+</body>
+</html>

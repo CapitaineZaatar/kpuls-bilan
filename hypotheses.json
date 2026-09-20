@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "misAJour": "2026-09-20",
+  "prixMensuel": null,
+  "semainesParAn": 44,
+  "reinvestissementPct": 50,
+  "defauts": {
+    "patientsParJour": 8,
+    "joursParSemaine": 5,
+    "nouveauxParSemaine": 4,
+    "dureeSeanceMin": 30,
+    "tarifSeance": 20
+  },
+  "postes": [
+    {
+      "id": "bilan-entree",
+      "libelle": "Bilan d'entrée préparé avant le rendez-vous",
+      "minutes": 10,
+      "base": "nouveau",
+      "partPct": 100,
+      "note": "Le patient décrit sa douleur avant de venir."
+    },
+    {
+      "id": "bilan-seance",
+      "libelle": "Bilan de séance prêt à imprimer",
+      "minutes": 3,
+      "base": "seance",
+      "partPct": 100,
+      "note": "Répétitions, régularité et synthèse déjà rédigées."
+    },
+    {
+      "id": "ordonnance",
+      "libelle": "Ordonnance et recherche de pharmacie",
+      "minutes": 5,
+      "base": "nouveau",
+      "partPct": 30,
+      "note": "Concerne les patients pour qui le kiné choisit un soulagement."
+    },
+    {
+      "id": "imagerie",
+      "libelle": "Demande d'imagerie préparée pour le médecin",
+      "minutes": 6,
+      "base": "nouveau",
+      "partPct": 10,
+      "note": "Brouillon transmis au médecin, qui décide et prescrit."
+    }
+  ],
+  "mention": "Estimation indicative, calculée à partir de tes chiffres et d'hypothèses modifiables. Ce n'est pas une promesse de résultat."
+}
