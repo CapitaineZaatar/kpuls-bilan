@@ -57,6 +57,30 @@
   .reinvest input[type=range] { width: 100%; accent-color: var(--corail); }
   .reinvest p { margin: 6px 0 0; font-size: 12.5px; color: var(--texte-doux); line-height: 1.4; }
 
+  .option-tete { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+  .option-tete h2 { margin-bottom: 6px; }
+  @media (max-width: 560px) { .option-tete { flex-direction: column; gap: 10px; } }
+  .interrupteur { display: flex; align-items: center; gap: 10px; flex: none; font-size: 13px; color: var(--texte-doux); cursor: pointer; }
+  .interrupteur input { position: absolute; opacity: 0; pointer-events: none; }
+  .interrupteur .piste { width: 48px; height: 28px; border-radius: 999px; background: rgba(255,255,255,.22); position: relative; transition: background .2s; }
+  .interrupteur .piste::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: var(--blanc); transition: transform .2s; }
+  .interrupteur input:checked + .piste { background: var(--corail); }
+  .interrupteur input:checked + .piste::after { transform: translateX(20px); }
+  .interrupteur input:focus-visible + .piste { outline: 2px solid var(--corail-clair); outline-offset: 2px; }
+  .compare { display: grid; gap: 14px; grid-template-columns: 1fr; margin: 6px 0 16px; }
+  @media (min-width: 720px) { .compare { grid-template-columns: 1fr 1fr; } }
+  .compare h3 { margin: 0 0 8px; font-size: 14px; color: var(--texte-doux); font-weight: 600; }
+  .compare .legende-titre { font-size: 12.5px; color: var(--texte-doux); margin: 0 0 8px; }
+  .barre { display: flex; height: 46px; border-radius: 12px; overflow: hidden; background: rgba(255,255,255,.06); }
+  .barre > div { display: grid; place-items: center; font-size: 12.5px; font-weight: 700; min-width: 0; overflow: hidden; white-space: nowrap; }
+  .seg-occupe { background: var(--corail); color: var(--blanc); }
+  .seg-attentif { background: var(--corail-clair); color: var(--nuit); }
+  .seg-libre { background: var(--blanc); color: var(--nuit); }
+  .legende-barre { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; font-size: 12.5px; color: var(--texte-doux); }
+  .legende-barre i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+  .note-option { margin: 12px 0 0; font-size: 12.5px; color: var(--texte-doux); line-height: 1.45; }
+  .repartition { margin: 12px 0 0; font-size: 13px; color: var(--texte-doux); line-height: 1.45; }
+  .repartition b { color: var(--blanc); }
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
   th, td { text-align: left; padding: 9px 6px; border-top: 1px solid var(--trait); vertical-align: top; }
   th { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--texte-doux); border-top: 0; }
@@ -93,6 +117,19 @@
       </div>
     </section>
   </div>
+
+  <section class="carte" id="option" style="margin-top:16px" hidden aria-labelledby="t-option">
+    <div class="option-tete">
+      <div>
+        <h2 id="t-option"></h2>
+        <p class="sous" id="option-desc"></p>
+      </div>
+      <label class="interrupteur"><input type="checkbox" id="option-case"><span class="piste"></span><span>Inclure dans le calcul</span></label>
+    </div>
+    <div class="compare" id="compare"></div>
+    <div class="chiffres" id="option-chiffres"></div>
+    <p class="note-option" id="option-note"></p>
+  </section>
 
   <section class="carte" style="margin-top:16px" aria-labelledby="t-calcul">
     <h2 id="t-calcul">Comment on calcule</h2>
@@ -134,6 +171,9 @@ function construireChamps() {
   $("reinvest").addEventListener("input", (e) => {
     saisie.reinvestissementPct = Number(e.target.value); ecrire(); afficher();
   });
+  $("option-case").addEventListener("change", (e) => {
+    saisie.optionPoulie = e.target.checked; ecrire(); afficher();
+  });
 }
 
 function chiffre(valeur, legende, classe = "") {
@@ -159,11 +199,54 @@ function afficher() {
     if (r.seuilSeancesMois !== null)
       html += chiffre(fmt.nombre(r.seuilSeancesMois, 1) + " séances", "de plus par mois suffisent à couvrir l'abonnement");
   }
+  if (r.optionActive) {
+    html += `<p class="repartition" style="grid-column:1/-1">Dont <b>${fmt.heures(r.minutesAdminSemaine / 60)}</b> de temps administratif et <b>${fmt.heures(r.minutesPoulieSemaine / 60)}</b> gagnés quand le patient est guidé par la poulie, chaque semaine.</p>`;
+  }
   $("chiffres").innerHTML = html;
+  afficherOption(r);
 
-  $("postes").innerHTML = r.postes.map((p) => `
+  const ligneOption = r.poulie ? `
+    <tr${r.optionActive ? "" : ' style="opacity:.55"'}><td>${r.poulie.libelle}${r.optionActive ? "" : " (non inclus)"}<small>${fmt.nombre(r.poulie.partPatientsPct)} % des patients font du renforcement, ${fmt.nombre(r.poulie.renfo)} min par séance, dont ${fmt.nombre(r.poulie.libre, 1)} min pendant lesquelles le kiné est libre.</small></td>
+        <td class="num">${fmt.nombre(r.poulie.liberesParSeance, 1)} min par séance</td><td class="num">${fmt.heures(r.minutesPoulieSemaine / 60)}</td></tr>` : "";
+  $("postes").innerHTML = ligneOption + r.postes.map((p) => `
     <tr><td>${p.libelle}<small>${p.minutes} min pour ${BASES[p.base].libelle}${p.partPct < 100 ? `, dans ${p.partPct} % des cas` : ""}. ${p.note || ""}</small></td>
         <td class="num">${p.minutes} min</td><td class="num">${fmt.heures(p.minutesSemaine / 60)}</td></tr>`).join("");
+}
+
+function afficherOption(r) {
+  const rg = hyp.renforcementGuide;
+  $("option").hidden = !r.poulie;
+  if (!r.poulie) return;
+  const o = r.poulie, c = r.comparateur;
+  $("t-option").textContent = rg.libelle;
+  $("option-desc").textContent = rg.description;
+  $("option-case").checked = !!saisie.optionPoulie;
+
+  const D = Math.max(o.renfo + o.enAvant, 1);
+  const seg = (classe, minutes) => minutes > 0 ? `<div class="${classe}" style="flex:${minutes}">${minutes >= 4 ? fmt.nombre(minutes, minutes % 1 ? 1 : 0) + " min" : ""}</div>` : "";
+  const legende = (couleur, texte) => `<span><i style="background:${couleur}"></i>${texte}</span>`;
+  $("compare").innerHTML = `
+    <div>
+      <h3>Sans KPULS</h3>
+      <p class="legende-titre">Une séance de ${fmt.nombre(D)} min avec renforcement</p>
+      <div class="barre">${seg("seg-occupe", D)}</div>
+      <div class="legende-barre">${legende("var(--corail)", "Kiné occupé auprès du patient")}</div>
+    </div>
+    <div>
+      <h3>Avec KPULS, patient guidé par la poulie</h3>
+      <p class="legende-titre">La même séance</p>
+      <div class="barre">${seg("seg-occupe", o.enAvant)}${seg("seg-attentif", o.attentif)}${seg("seg-libre", o.libre)}</div>
+      <div class="legende-barre">
+        ${legende("var(--corail)", "Kiné occupé")}
+        ${o.attentif > 0 ? legende("var(--corail-clair)", "Kiné attentif") : ""}
+        ${legende("var(--blanc)", `Kiné disponible pour un autre patient (${fmt.nombre(o.libre, 1)} min)`)}
+      </div>
+    </div>`;
+
+  $("option-chiffres").innerHTML =
+      `<div class="chiffre"><div class="valeur">${fmt.nombre(c.patientsJourSans, 1)} → ${fmt.nombre(c.patientsJourAvec, 1)}</div><div class="legende">patients par jour, si tu réinvestis ${fmt.nombre(saisie.reinvestissementPct)} % du temps libéré</div></div>`
+    + `<div class="chiffre"><div class="valeur">${fmt.euros(c.caAn)}</div><div class="legende">de chiffre d'affaires potentiel par an grâce à cette option seule</div></div>`;
+  $("option-note").textContent = (rg.note || "") + (!saisie.optionPoulie ? " Cette option n'est pas incluse dans le total ci-dessus : coche « Inclure dans le calcul »." : "");
 }
 
 async function demarrer() {
@@ -172,7 +255,8 @@ async function demarrer() {
     if (!rep.ok) throw new Error(rep.status);
     hyp = await rep.json();
   } catch (e) { $("erreur").style.display = "block"; return; }
-  saisie = { ...hyp.defauts, reinvestissementPct: hyp.reinvestissementPct, ...lire() };
+  saisie = { ...hyp.defauts, reinvestissementPct: hyp.reinvestissementPct,
+             optionPoulie: !!(hyp.renforcementGuide && hyp.renforcementGuide.actifParDefaut), ...lire() };
   const d = new Date(hyp.misAJour + "T12:00:00");
   $("maj").textContent = "Hypothèses mises à jour le " + d.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" }) + ".";
   $("mention").textContent = hyp.mention;

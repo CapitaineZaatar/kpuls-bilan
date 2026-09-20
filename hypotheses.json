@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "misAJour": "2026-09-20",
   "prixMensuel": 220,
   "semainesParAn": 49,
@@ -10,6 +10,15 @@
     "nouveauxParSemaine": 7,
     "dureeSeanceMin": 20,
     "tarifSeance": 20
+  },
+  "renforcementGuide": {
+    "libelle": "Patient guidé par la poulie",
+    "description": "Pendant que le jeu guide le renforcement, le kiné reste dans la salle et redevient disponible pour un autre patient.",
+    "partPatientsPct": 60,
+    "minutesRenfo": 10,
+    "supervisionPct": 25,
+    "actifParDefaut": false,
+    "note": "Fonctionnement visé du produit : le kiné reste dans la salle. À valider avec les règles de facturation de la profession."
   },
   "postes": [
     {

@@ -124,6 +124,18 @@
     </div>
 
     <div class="carte">
+      <h2>Option « patient guidé par la poulie »</h2>
+      <p class="sous">Pendant que le jeu guide le renforcement, le kiné redevient disponible pour un autre patient. Ces réglages alimentent le comparateur du calculateur.</p>
+      <label class="ligne"><span class="nom">Titre de l'option</span><span class="champ-droit" style="flex:1; max-width:340px"><input class="large" type="text" id="rg-libelle"></span></label>
+      <div style="padding:9px 0; border-top:1px solid var(--trait)"><span style="font-size:15px">Phrase d'explication</span><textarea id="rg-description" style="margin-top:8px"></textarea></div>
+      <label class="ligne"><span class="nom">Part des patients qui font du renforcement</span><span class="champ-droit"><input type="number" id="rg-part" min="0" max="100" step="5"><span class="unite">%</span></span></label>
+      <label class="ligne"><span class="nom">Temps de renforcement dans une séance<small>Ne peut pas dépasser la durée de séance de départ.</small></span><span class="champ-droit"><input type="number" id="rg-minutes" min="0" step="any"><span class="unite">min</span></span></label>
+      <label class="ligne"><span class="nom">Part de ce temps où le kiné reste attentif<small>Le reste est libre pour un autre patient.</small></span><span class="champ-droit"><input type="number" id="rg-supervision" min="0" max="100" step="5"><span class="unite">%</span></span></label>
+      <label class="ligne"><span class="nom">Inclure l'option dans le total dès l'ouverture</span><span class="champ-droit"><input type="checkbox" id="rg-actif" style="width:22px; height:22px; accent-color:#FF6B5E"></span></label>
+      <div style="padding:9px 0; border-top:1px solid var(--trait)"><span style="font-size:15px">Précision affichée sous le comparateur</span><textarea id="rg-note" style="margin-top:8px"></textarea></div>
+    </div>
+
+    <div class="carte">
       <h2>Postes de gain de temps</h2>
       <p class="sous">Chaque poste dit combien de minutes KPULS fait gagner, et à quelle fréquence. Minutes gagnées par séance ou par nouveau patient, multipliées par la part des cas concernés.</p>
       <div id="postes"></div>
@@ -153,6 +165,13 @@ const DEPOT = "capitainezaatar/kpuls-bilan";
 const FICHIER = "hypotheses.json";
 const BRANCHE = "main";
 const API = `https://api.github.com/repos/${DEPOT}`;
+
+const RG_DEFAUT = {
+  libelle: "Patient guidé par la poulie",
+  description: "Pendant que le jeu guide le renforcement, le kiné reste dans la salle et redevient disponible pour un autre patient.",
+  partPatientsPct: 60, minutesRenfo: 10, supervisionPct: 25, actifParDefaut: false,
+  note: "Fonctionnement visé du produit : le kiné reste dans la salle. À valider avec les règles de facturation de la profession."
+};
 
 let token = "";        // reste en mémoire, jamais écrit ailleurs
 let sha = "";          // version du fichier chez GitHub
@@ -190,6 +209,7 @@ async function seConnecter() {
     $("bt-connexion").disabled = false;
     return;
   }
+  if (!hyp.renforcementGuide) hyp.renforcementGuide = { ...RG_DEFAUT };   // ancien fichier sans l'option
   $("token").value = "";
   $("connexion").hidden = true;
   $("formulaire").hidden = false;
@@ -206,6 +226,11 @@ function remplir() {
   $("reinvestissementPct").value = hyp.reinvestissementPct;
   document.querySelectorAll("[data-defaut]").forEach((i) => i.value = hyp.defauts[i.dataset.defaut]);
   $("mention").value = hyp.mention || "";
+  const rg = hyp.renforcementGuide;
+  $("rg-libelle").value = rg.libelle; $("rg-description").value = rg.description;
+  $("rg-part").value = rg.partPatientsPct; $("rg-minutes").value = rg.minutesRenfo;
+  $("rg-supervision").value = rg.supervisionPct; $("rg-actif").checked = !!rg.actifParDefaut;
+  $("rg-note").value = rg.note || "";
   dessinerPostes();
 }
 
@@ -238,6 +263,11 @@ function lireChamps() {
   hyp.reinvestissementPct = nombre($("reinvestissementPct").value);
   document.querySelectorAll("[data-defaut]").forEach((i) => hyp.defauts[i.dataset.defaut] = nombre(i.value));
   hyp.mention = $("mention").value;
+  const rg = hyp.renforcementGuide;
+  rg.libelle = $("rg-libelle").value; rg.description = $("rg-description").value;
+  rg.partPatientsPct = nombre($("rg-part").value); rg.minutesRenfo = nombre($("rg-minutes").value);
+  rg.supervisionPct = nombre($("rg-supervision").value); rg.actifParDefaut = $("rg-actif").checked;
+  rg.note = $("rg-note").value;
 }
 
 function valider() {
@@ -248,6 +278,12 @@ function valider() {
   if (!(n(hyp.reinvestissementPct) && hyp.reinvestissementPct >= 0 && hyp.reinvestissementPct <= 100)) e.push("La part réinvestie doit être entre 0 et 100 %.");
   for (const [k, v] of Object.entries(hyp.defauts)) if (!(n(v) && v >= 0)) e.push("Un chiffre de départ du kiné est vide ou négatif.");
   if (!(hyp.defauts.dureeSeanceMin > 0)) e.push("La durée d'une séance doit être supérieure à 0.");
+  const rg = hyp.renforcementGuide;
+  if (!rg.libelle.trim()) e.push("L'option « patient guidé par la poulie » n'a pas de titre.");
+  if (!(n(rg.partPatientsPct) && rg.partPatientsPct >= 0 && rg.partPatientsPct <= 100)) e.push("Option poulie : la part des patients doit être entre 0 et 100 %.");
+  if (!(n(rg.supervisionPct) && rg.supervisionPct >= 0 && rg.supervisionPct <= 100)) e.push("Option poulie : la part d'attention du kiné doit être entre 0 et 100 %.");
+  if (!(n(rg.minutesRenfo) && rg.minutesRenfo >= 0)) e.push("Option poulie : le temps de renforcement doit être un nombre positif.");
+  else if (n(hyp.defauts.dureeSeanceMin) && rg.minutesRenfo > hyp.defauts.dureeSeanceMin) e.push("Option poulie : le temps de renforcement dépasse la durée de séance de départ.");
   if (hyp.postes.length === 0) e.push("Il faut au moins un poste.");
   hyp.postes.forEach((p, i) => {
     const nom = p.libelle.trim() ? `« ${p.libelle.trim()} »` : `Le poste ${i + 1}`;
@@ -262,7 +298,7 @@ function rafraichir() {
   const erreurs = valider();
   message("erreurs", erreurs.length ? `À corriger avant d'enregistrer :<ul>${erreurs.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : "");
   if (!erreurs.length) {
-    const r = calculer(hyp, { ...hyp.defauts, reinvestissementPct: hyp.reinvestissementPct });
+    const r = calculer(hyp, { ...hyp.defauts, reinvestissementPct: hyp.reinvestissementPct, optionPoulie: hyp.renforcementGuide.actifParDefaut });
     let h = `<div><b>${fmt.heures(r.heuresSemaine)}</b><span>libérées par semaine</span></div>
              <div><b>${fmt.nombre(r.heuresAn)} h</b><span>libérées par an</span></div>
              <div><b>${fmt.euros(r.caAn)}</b><span>de CA potentiel par an</span></div>`;
@@ -325,13 +361,21 @@ function pourEnvoi() {
     if (p.note && p.note.trim()) sortie.note = p.note.trim();
     return sortie;
   });
+  const rg = hyp.renforcementGuide;
+  const renforcementGuide = {
+    libelle: rg.libelle.trim(), description: rg.description.trim(),
+    partPatientsPct: rg.partPatientsPct, minutesRenfo: rg.minutesRenfo, supervisionPct: rg.supervisionPct,
+    actifParDefaut: !!rg.actifParDefaut
+  };
+  if (rg.note && rg.note.trim()) renforcementGuide.note = rg.note.trim();
   return {
-    version: hyp.version || 1,
+    version: Math.max(hyp.version || 1, 2),
     misAJour: new Date().toISOString().slice(0, 10),
     prixMensuel: hyp.prixMensuel,
     semainesParAn: hyp.semainesParAn,
     reinvestissementPct: hyp.reinvestissementPct,
     defauts: hyp.defauts,
+    renforcementGuide,
     postes,
     mention: hyp.mention.trim()
   };
@@ -367,7 +411,7 @@ async function enregistrer() {
 
 $("bt-connexion").addEventListener("click", seConnecter);
 $("token").addEventListener("keydown", (e) => { if (e.key === "Enter") seConnecter(); });
-["prixMensuel", "semainesParAn", "reinvestissementPct", "mention"].forEach((id) => $(id).addEventListener("input", surSaisie));
+["prixMensuel", "semainesParAn", "reinvestissementPct", "mention", "rg-libelle", "rg-description", "rg-part", "rg-minutes", "rg-supervision", "rg-actif", "rg-note"].forEach((id) => $(id).addEventListener("input", surSaisie));
 document.querySelectorAll("[data-defaut]").forEach((i) => i.addEventListener("input", surSaisie));
 $("postes").addEventListener("input", surPoste);
 $("postes").addEventListener("change", surPoste);
