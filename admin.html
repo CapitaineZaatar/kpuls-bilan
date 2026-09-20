@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#17324D">
+<title>KPULS, tableau de commande</title>
+<style>
+  :root {
+    --nuit: #17324D; --corail: #FF6B5E; --corail-clair: #FFA69E; --blanc: #FFFFFF;
+    --carte: rgba(255, 255, 255, 0.08); --trait: rgba(255, 255, 255, 0.14);
+    --texte-doux: rgba(255, 255, 255, 0.68);
+    --police: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html { background: var(--nuit); }
+  body {
+    margin: 0; min-height: 100vh; color: var(--blanc); font-family: var(--police);
+    background: radial-gradient(120% 60% at 50% 0%, #23507a 0%, var(--nuit) 62%) no-repeat, var(--nuit);
+    padding: max(20px, env(safe-area-inset-top)) 16px 120px;
+  }
+  main { max-width: 900px; margin: 0 auto; }
+  [hidden] { display: none !important; }
+  h1 { font-size: 28px; letter-spacing: -0.02em; margin: 8px 0 6px; }
+  .intro { color: var(--texte-doux); font-size: 15px; line-height: 1.45; margin: 0 0 20px; max-width: 640px; }
+  .etiquette { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--corail-clair); margin: 0 0 10px; }
+  .carte { background: var(--carte); border: 1px solid var(--trait); border-radius: 20px; padding: 18px; margin-bottom: 16px; }
+  .carte h2 { margin: 0 0 4px; font-size: 18px; }
+  .carte .sous { margin: 0 0 12px; color: var(--texte-doux); font-size: 14px; line-height: 1.4; }
+
+  .ligne { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--trait); font-size: 15px; }
+  .ligne:first-of-type { border-top: 0; }
+  .ligne .nom { flex: 1; line-height: 1.3; }
+  .ligne small { display: block; color: var(--texte-doux); font-size: 12.5px; margin-top: 2px; }
+  input, select, textarea {
+    padding: 9px 10px; border-radius: 12px; border: 1px solid var(--trait);
+    background: rgba(255,255,255,.1); color: var(--blanc); font: inherit; font-size: 16px;
+  }
+  select option { color: #17324D; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--corail); outline-offset: 1px; }
+  input[type=number] { width: 96px; text-align: right; font-weight: 700; }
+  input.large, textarea { width: 100%; }
+  textarea { min-height: 76px; resize: vertical; line-height: 1.4; }
+  .unite { color: var(--texte-doux); font-size: 13px; margin-left: 6px; }
+  .champ-droit { display: flex; align-items: center; flex: none; }
+
+  button { font: inherit; cursor: pointer; }
+  .bouton { border: 0; border-radius: 14px; padding: 12px 18px; font-weight: 700; font-size: 15px; background: var(--corail); color: var(--blanc); }
+  .bouton:disabled { opacity: .4; cursor: not-allowed; }
+  .bouton.discret { background: rgba(255,255,255,.12); }
+  .petit { border: 1px solid var(--trait); background: transparent; color: var(--blanc); border-radius: 10px; padding: 6px 10px; font-size: 13px; }
+  .petit.danger { color: var(--corail-clair); }
+
+  .poste { border-top: 1px solid var(--trait); padding: 14px 0; display: grid; gap: 10px; }
+  .poste:first-of-type { border-top: 0; padding-top: 4px; }
+  .poste .rang { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .poste label { display: grid; gap: 4px; font-size: 12.5px; color: var(--texte-doux); }
+  .poste label input, .poste label select { width: 100%; text-align: left; }
+  .poste .actions { display: flex; gap: 8px; justify-content: flex-end; }
+  @media (max-width: 560px) { .poste .rang { grid-template-columns: 1fr; } }
+
+  .apercu { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+  .apercu div { background: rgba(255,255,255,.07); border-radius: 14px; padding: 12px; }
+  .apercu b { display: block; font-size: 22px; letter-spacing: -0.02em; }
+  .apercu span { font-size: 12.5px; color: var(--texte-doux); }
+
+  #barre {
+    position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 16px max(12px, env(safe-area-inset-bottom));
+    background: rgba(23, 50, 77, 0.94); border-top: 1px solid var(--trait);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  }
+  #barre .contenu { max-width: 900px; margin: 0 auto; display: flex; align-items: center; gap: 12px; }
+  #etat { flex: 1; font-size: 14px; color: var(--texte-doux); line-height: 1.35; }
+  #etat.ok { color: #9be8b4; } #etat.ko { color: var(--corail-clair); }
+  .erreurs { margin: 0 0 12px; padding: 12px 14px; border-radius: 14px; background: rgba(255,107,94,.16); border: 1px solid var(--corail); font-size: 14px; line-height: 1.45; }
+  .erreurs ul { margin: 6px 0 0; padding-left: 18px; }
+  .aide-token { font-size: 13px; color: var(--texte-doux); line-height: 1.5; margin: 12px 0 0; }
+  .aide-token code { background: rgba(255,255,255,.1); padding: 1px 6px; border-radius: 6px; }
+</style>
+</head>
+<body>
+<main>
+  <p class="etiquette">KPULS · réservé</p>
+  <h1>Tableau de commande</h1>
+  <p class="intro">Ici, tu règles les hypothèses du calculateur : prix, minutes gagnées, pourcentages, textes. Rien ne s'enregistre sans ton token GitHub.</p>
+
+  <!-- Connexion -->
+  <section class="carte" id="connexion">
+    <h2>Connexion</h2>
+    <p class="sous">Colle ton token GitHub. Il reste dans cette page, il n'est ni enregistré ni envoyé ailleurs qu'à GitHub.</p>
+    <div class="ligne" style="border-top:0; gap:8px">
+      <input class="large" id="token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="github_pat_…">
+      <button class="bouton" id="bt-connexion">Se connecter</button>
+    </div>
+    <p class="aide-token">Créer un token : GitHub, Settings, Developer settings, Fine-grained tokens. Dépôt <code>kpuls-bilan</code> uniquement, permission <code>Contents : Read and write</code>, durée courte.</p>
+    <div class="erreurs" id="erreur-connexion" hidden></div>
+  </section>
+
+  <!-- Formulaire -->
+  <div id="formulaire" hidden>
+    <div class="carte">
+      <h2>Aperçu avec les chiffres de départ</h2>
+      <p class="sous">Se met à jour pendant que tu modifies. C'est ce que verrait un kiné qui ne change rien.</p>
+      <div class="apercu" id="apercu"></div>
+    </div>
+
+    <div class="carte">
+      <h2>Réglages généraux</h2>
+      <p class="sous">Le prix est mensuel, par cabinet. Laisse vide pour afficher « À définir ».</p>
+      <label class="ligne"><span class="nom">Prix de l'abonnement</span><span class="champ-droit"><input type="number" id="prixMensuel" min="0" step="any"><span class="unite">€ / mois</span></span></label>
+      <label class="ligne"><span class="nom">Semaines travaillées par an<small>Sert à passer de la semaine à l'année.</small></span><span class="champ-droit"><input type="number" id="semainesParAn" min="1" max="52" step="1"><span class="unite">semaines</span></span></label>
+      <label class="ligne"><span class="nom">Part du temps libéré réinvestie<small>Valeur de départ du curseur du kiné.</small></span><span class="champ-droit"><input type="number" id="reinvestissementPct" min="0" max="100" step="5"><span class="unite">%</span></span></label>
+    </div>
+
+    <div class="carte">
+      <h2>Chiffres de départ du kiné</h2>
+      <p class="sous">Ce qui est prérempli à gauche du calculateur. Le kiné les remplace par les siens.</p>
+      <label class="ligne"><span class="nom">Patients par jour</span><span class="champ-droit"><input type="number" data-defaut="patientsParJour" min="0" step="any"></span></label>
+      <label class="ligne"><span class="nom">Jours travaillés par semaine</span><span class="champ-droit"><input type="number" data-defaut="joursParSemaine" min="0" max="7" step="any"></span></label>
+      <label class="ligne"><span class="nom">Nouveaux patients par semaine</span><span class="champ-droit"><input type="number" data-defaut="nouveauxParSemaine" min="0" step="any"></span></label>
+      <label class="ligne"><span class="nom">Durée moyenne d'une séance</span><span class="champ-droit"><input type="number" data-defaut="dureeSeanceMin" min="1" step="any"><span class="unite">min</span></span></label>
+      <label class="ligne"><span class="nom">Tarif moyen d'une séance</span><span class="champ-droit"><input type="number" data-defaut="tarifSeance" min="0" step="any"><span class="unite">€</span></span></label>
+    </div>
+
+    <div class="carte">
+      <h2>Postes de gain de temps</h2>
+      <p class="sous">Chaque poste dit combien de minutes KPULS fait gagner, et à quelle fréquence. Minutes gagnées par séance ou par nouveau patient, multipliées par la part des cas concernés.</p>
+      <div id="postes"></div>
+      <button class="bouton discret" id="bt-ajout" style="margin-top:8px">Ajouter un poste</button>
+    </div>
+
+    <div class="carte">
+      <h2>Mention affichée en bas de page</h2>
+      <textarea id="mention"></textarea>
+    </div>
+
+    <div class="erreurs" id="erreurs" hidden></div>
+  </div>
+</main>
+
+<div id="barre" hidden>
+  <div class="contenu">
+    <div id="etat">Aucune modification.</div>
+    <button class="bouton discret" id="bt-annuler" disabled>Annuler</button>
+    <button class="bouton" id="bt-enregistrer" disabled>Enregistrer</button>
+  </div>
+</div>
+
+<script src="calcul.js"></script>
+<script>
+const DEPOT = "capitainezaatar/kpuls-bilan";
+const FICHIER = "hypotheses.json";
+const BRANCHE = "main";
+const API = `https://api.github.com/repos/${DEPOT}`;
+
+let token = "";        // reste en mémoire, jamais écrit ailleurs
+let sha = "";          // version du fichier chez GitHub
+let hyp = null;        // ce qu'on est en train d'éditer
+let initial = "";      // photo de départ, pour savoir s'il y a eu un changement
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const enTete = () => ({ Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" });
+
+const versBase64 = (texte) => { const o = new TextEncoder().encode(texte); let b = ""; o.forEach((x) => b += String.fromCharCode(x)); return btoa(b); };
+const depuisBase64 = (b64) => { const b = atob(b64.replace(/\s/g, "")); return new TextDecoder().decode(Uint8Array.from(b, (c) => c.charCodeAt(0))); };
+const photo = () => JSON.stringify({ ...hyp, misAJour: "" });
+
+function message(id, texte) { const e = $(id); e.hidden = !texte; if (texte) e.innerHTML = texte; }
+function etat(texte, classe = "") { const e = $("etat"); e.textContent = texte; e.className = classe; }
+
+// ---------- Connexion ----------
+async function seConnecter() {
+  message("erreur-connexion", "");
+  token = $("token").value.trim();
+  if (!token) { message("erreur-connexion", "Colle d'abord ton token."); return; }
+  $("bt-connexion").disabled = true;
+  try {
+    const rep = await fetch(`${API}/contents/${FICHIER}?ref=${BRANCHE}`, { headers: enTete(), cache: "no-store" });
+    if (rep.status === 401) throw new Error("Token refusé par GitHub. Vérifie qu'il est complet et qu'il n'a pas expiré.");
+    if (rep.status === 404) throw new Error("Fichier ou dépôt introuvable. Ce token n'a peut-être pas accès au dépôt kpuls-bilan.");
+    if (!rep.ok) throw new Error("GitHub a répondu une erreur (" + rep.status + ").");
+    const donnees = await rep.json();
+    sha = donnees.sha;
+    hyp = JSON.parse(depuisBase64(donnees.content));
+  } catch (e) {
+    token = "";
+    message("erreur-connexion", esc(e.message || "Connexion impossible. Vérifie le réseau."));
+    $("bt-connexion").disabled = false;
+    return;
+  }
+  $("token").value = "";
+  $("connexion").hidden = true;
+  $("formulaire").hidden = false;
+  $("barre").hidden = false;
+  initial = photo();
+  remplir();
+  rafraichir();
+}
+
+// ---------- Formulaire ----------
+function remplir() {
+  $("prixMensuel").value = hyp.prixMensuel ?? "";
+  $("semainesParAn").value = hyp.semainesParAn;
+  $("reinvestissementPct").value = hyp.reinvestissementPct;
+  document.querySelectorAll("[data-defaut]").forEach((i) => i.value = hyp.defauts[i.dataset.defaut]);
+  $("mention").value = hyp.mention || "";
+  dessinerPostes();
+}
+
+function dessinerPostes() {
+  $("postes").innerHTML = hyp.postes.map((p, i) => `
+    <div class="poste" data-i="${i}">
+      <label>Libellé<input type="text" data-champ="libelle" value="${esc(p.libelle)}"></label>
+      <div class="rang">
+        <label>Minutes gagnées<input type="number" data-champ="minutes" min="0" step="any" value="${esc(p.minutes)}"></label>
+        <label>Par<select data-champ="base">
+          <option value="seance"${p.base === "seance" ? " selected" : ""}>chaque séance</option>
+          <option value="nouveau"${p.base === "nouveau" ? " selected" : ""}>chaque nouveau patient</option>
+        </select></label>
+        <label>Part des cas concernés (%)<input type="number" data-champ="partPct" min="0" max="100" step="5" value="${esc(p.partPct)}"></label>
+      </div>
+      <label>Précision affichée (facultatif)<input type="text" data-champ="note" value="${esc(p.note)}"></label>
+      <div class="actions">
+        <button class="petit" data-action="haut"${i === 0 ? " disabled" : ""}>Monter</button>
+        <button class="petit" data-action="bas"${i === hyp.postes.length - 1 ? " disabled" : ""}>Descendre</button>
+        <button class="petit danger" data-action="supprimer">Supprimer</button>
+      </div>
+    </div>`).join("") || `<p class="sous">Aucun poste. Ajoutes-en un.</p>`;
+}
+
+const nombre = (v) => (v === "" ? null : Number(v));
+
+function lireChamps() {
+  hyp.prixMensuel = nombre($("prixMensuel").value);
+  hyp.semainesParAn = nombre($("semainesParAn").value);
+  hyp.reinvestissementPct = nombre($("reinvestissementPct").value);
+  document.querySelectorAll("[data-defaut]").forEach((i) => hyp.defauts[i.dataset.defaut] = nombre(i.value));
+  hyp.mention = $("mention").value;
+}
+
+function valider() {
+  const e = [];
+  const n = (v) => Number.isFinite(v);
+  if (hyp.prixMensuel !== null && !(n(hyp.prixMensuel) && hyp.prixMensuel >= 0)) e.push("Le prix doit être un nombre positif, ou vide.");
+  if (!(n(hyp.semainesParAn) && hyp.semainesParAn >= 1 && hyp.semainesParAn <= 52)) e.push("Les semaines travaillées par an doivent être entre 1 et 52.");
+  if (!(n(hyp.reinvestissementPct) && hyp.reinvestissementPct >= 0 && hyp.reinvestissementPct <= 100)) e.push("La part réinvestie doit être entre 0 et 100 %.");
+  for (const [k, v] of Object.entries(hyp.defauts)) if (!(n(v) && v >= 0)) e.push("Un chiffre de départ du kiné est vide ou négatif.");
+  if (!(hyp.defauts.dureeSeanceMin > 0)) e.push("La durée d'une séance doit être supérieure à 0.");
+  if (hyp.postes.length === 0) e.push("Il faut au moins un poste.");
+  hyp.postes.forEach((p, i) => {
+    const nom = p.libelle.trim() ? `« ${p.libelle.trim()} »` : `Le poste ${i + 1}`;
+    if (!p.libelle.trim()) e.push(`Le poste ${i + 1} n'a pas de libellé.`);
+    if (!(n(p.minutes) && p.minutes >= 0)) e.push(`${nom} : les minutes doivent être un nombre positif.`);
+    if (!(n(p.partPct) && p.partPct >= 0 && p.partPct <= 100)) e.push(`${nom} : la part des cas doit être entre 0 et 100.`);
+  });
+  return [...new Set(e)];
+}
+
+function rafraichir() {
+  const erreurs = valider();
+  message("erreurs", erreurs.length ? `À corriger avant d'enregistrer :<ul>${erreurs.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : "");
+  if (!erreurs.length) {
+    const r = calculer(hyp, { ...hyp.defauts, reinvestissementPct: hyp.reinvestissementPct });
+    let h = `<div><b>${fmt.heures(r.heuresSemaine)}</b><span>libérées par semaine</span></div>
+             <div><b>${fmt.nombre(r.heuresAn)} h</b><span>libérées par an</span></div>
+             <div><b>${fmt.euros(r.caAn)}</b><span>de CA potentiel par an</span></div>`;
+    h += r.prix === null ? `<div><b>À définir</b><span>prix de l'abonnement</span></div>`
+                         : `<div><b>${fmt.euros(r.gainNetAn)}</b><span>de gain net par an</span></div>`;
+    $("apercu").innerHTML = h;
+  }
+  const modifie = photo() !== initial;
+  $("bt-enregistrer").disabled = !modifie || erreurs.length > 0;
+  $("bt-annuler").disabled = !modifie;
+  if (!$("etat").classList.contains("ok") || modifie) {
+    etat(erreurs.length ? "Des champs sont à corriger." : modifie ? "Modifications non enregistrées." : "Aucune modification.");
+  }
+}
+
+function surSaisie() { lireChamps(); rafraichir(); }
+
+function surPoste(e) {
+  const bloc = e.target.closest(".poste"); if (!bloc) return;
+  const p = hyp.postes[Number(bloc.dataset.i)], c = e.target.dataset.champ; if (!c) return;
+  p[c] = (c === "minutes" || c === "partPct") ? nombre(e.target.value) : e.target.value;
+  rafraichir();
+}
+
+function actionPoste(e) {
+  const b = e.target.closest("[data-action]"); if (!b) return;
+  const i = Number(b.closest(".poste").dataset.i), a = b.dataset.action;
+  if (a === "supprimer") {
+    if (!confirm(`Supprimer le poste « ${hyp.postes[i].libelle} » ?`)) return;
+    hyp.postes.splice(i, 1);
+  } else {
+    const j = a === "haut" ? i - 1 : i + 1;
+    [hyp.postes[i], hyp.postes[j]] = [hyp.postes[j], hyp.postes[i]];
+  }
+  dessinerPostes(); rafraichir();
+}
+
+function ajouterPoste() {
+  hyp.postes.push({ id: "", libelle: "", minutes: 0, base: "seance", partPct: 100, note: "" });
+  dessinerPostes(); rafraichir();
+  const derniers = document.querySelectorAll('.poste [data-champ="libelle"]');
+  derniers[derniers.length - 1].focus();
+}
+
+function annuler() {
+  hyp = JSON.parse(initial); hyp.misAJour = hyp.misAJour || "";
+  remplir(); rafraichir();
+}
+
+// ---------- Enregistrement ----------
+const slug = (s) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "poste";
+
+function pourEnvoi() {
+  const vus = new Set();
+  const postes = hyp.postes.map((p) => {
+    let id = p.id || slug(p.libelle), k = 2;
+    while (vus.has(id)) id = `${slug(p.libelle)}-${k++}`;
+    vus.add(id);
+    const sortie = { id, libelle: p.libelle.trim(), minutes: p.minutes, base: p.base, partPct: p.partPct };
+    if (p.note && p.note.trim()) sortie.note = p.note.trim();
+    return sortie;
+  });
+  return {
+    version: hyp.version || 1,
+    misAJour: new Date().toISOString().slice(0, 10),
+    prixMensuel: hyp.prixMensuel,
+    semainesParAn: hyp.semainesParAn,
+    reinvestissementPct: hyp.reinvestissementPct,
+    defauts: hyp.defauts,
+    postes,
+    mention: hyp.mention.trim()
+  };
+}
+
+async function enregistrer() {
+  if (valider().length) return;
+  $("bt-enregistrer").disabled = true; $("bt-annuler").disabled = true;
+  etat("Enregistrement en cours…");
+  const contenu = JSON.stringify(pourEnvoi(), null, 2) + "\n";
+  try {
+    const rep = await fetch(`${API}/contents/${FICHIER}`, {
+      method: "PUT",
+      headers: { ...enTete(), "Content-Type": "application/json" },
+      body: JSON.stringify({ message: "Hypothèses du calculateur : mise à jour depuis le tableau de commande", content: versBase64(contenu), sha, branch: BRANCHE })
+    });
+    if (rep.status === 401) throw new Error("Token refusé. Reconnecte-toi avec un token valide.");
+    if (rep.status === 403 || rep.status === 404) throw new Error("Ce token n'a pas le droit d'écrire dans kpuls-bilan (permission Contents : Read and write).");
+    if (rep.status === 409 || rep.status === 422) throw new Error("Le fichier a changé ailleurs entre-temps. Recharge la page pour repartir de la dernière version.");
+    if (!rep.ok) throw new Error("GitHub a répondu une erreur (" + rep.status + ").");
+    const donnees = await rep.json();
+    sha = donnees.content.sha;
+    hyp = JSON.parse(contenu); initial = photo();
+    remplir();
+    $("etat").className = "ok";
+    etat("Enregistré. Visible sur le site dans une à deux minutes.", "ok");
+    $("bt-enregistrer").disabled = true; $("bt-annuler").disabled = true;
+  } catch (e) {
+    rafraichir();
+    etat(e.message || "Enregistrement impossible.", "ko");
+  }
+}
+
+$("bt-connexion").addEventListener("click", seConnecter);
+$("token").addEventListener("keydown", (e) => { if (e.key === "Enter") seConnecter(); });
+["prixMensuel", "semainesParAn", "reinvestissementPct", "mention"].forEach((id) => $(id).addEventListener("input", surSaisie));
+document.querySelectorAll("[data-defaut]").forEach((i) => i.addEventListener("input", surSaisie));
+$("postes").addEventListener("input", surPoste);
+$("postes").addEventListener("change", surPoste);
+$("postes").addEventListener("click", actionPoste);
+$("bt-ajout").addEventListener("click", ajouterPoste);
+$("bt-annuler").addEventListener("click", annuler);
+$("bt-enregistrer").addEventListener("click", enregistrer);
+</script>
+</body>
+</html>
