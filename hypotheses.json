@@ -1,14 +1,14 @@
 {
   "version": 1,
   "misAJour": "2026-09-20",
-  "prixMensuel": null,
-  "semainesParAn": 44,
-  "reinvestissementPct": 50,
+  "prixMensuel": 220,
+  "semainesParAn": 49,
+  "reinvestissementPct": 35,
   "defauts": {
-    "patientsParJour": 8,
-    "joursParSemaine": 5,
-    "nouveauxParSemaine": 4,
-    "dureeSeanceMin": 30,
+    "patientsParJour": 33,
+    "joursParSemaine": 6,
+    "nouveauxParSemaine": 7,
+    "dureeSeanceMin": 20,
     "tarifSeance": 20
   },
   "postes": [
